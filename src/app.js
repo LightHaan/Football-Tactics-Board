@@ -1,6 +1,6 @@
-import { MatchSimulation } from "./simulation.js?v=29";
-import { FootballRenderer } from "./render.js?v=29";
-import { MatchAudio } from "./audio.js?v=29";
+import { MatchSimulation } from "./simulation.js?v=30";
+import { FootballRenderer } from "./render.js?v=30";
+import { MatchAudio } from "./audio.js?v=30";
 import {
   COUNTRY_DATABASE,
   COUNTRY_OPTIONS,
@@ -10,7 +10,7 @@ import {
   MATCH_TEAM_CODES,
   SUBSTITUTIONS,
   TACTIC_OPTIONS,
-} from "./data.js?v=29";
+} from "./data.js?v=30";
 
 const canvas = document.querySelector("#pitchCanvas");
 const renderer = new FootballRenderer(canvas);
@@ -41,7 +41,9 @@ const ui = {
   noticeTitle: document.querySelector("#noticeTitle"),
   noticeMessage: document.querySelector("#noticeMessage"),
   settingsToggle: document.querySelector("#settingsToggle"),
+  tacticsToggle: document.querySelector("#tacticsToggle"),
   setupPanel: document.querySelector("#setupPanel"),
+  tacticsPanel: document.querySelector("#tacticsPanel"),
   homeTeamSelect: document.querySelector("#homeTeamSelect"),
   awayTeamSelect: document.querySelector("#awayTeamSelect"),
   homeFormationSelect: document.querySelector("#homeFormationSelect"),
@@ -52,6 +54,7 @@ const ui = {
   awayLineupEditor: document.querySelector("#awayLineupEditor"),
   matchLengthSelect: document.querySelector("#matchLengthSelect"),
   soundToggle: document.querySelector("#soundToggle"),
+  autoSubstitutionToggle: document.querySelector("#autoSubstitutionToggle"),
   startMatchButton: document.querySelector("#startMatchButton"),
   substitutionTeamSelect: document.querySelector("#substitutionTeamSelect"),
   substitutionOutSelect: document.querySelector("#substitutionOutSelect"),
@@ -102,6 +105,7 @@ setSideDefaults("home", MATCH_TEAM_CODES[0]);
 setSideDefaults("away", MATCH_TEAM_CODES[1]);
 ui.matchLengthSelect.value = String(MATCH.seconds);
 ui.settingsToggle.addEventListener("click", toggleSetupPanel);
+ui.tacticsToggle.addEventListener("click", toggleTacticsPanel);
 ui.homeTeamSelect.addEventListener("change", () => handleTeamChanged("home"));
 ui.awayTeamSelect.addEventListener("change", () => handleTeamChanged("away"));
 ui.homeFormationSelect.addEventListener("change", () => renderLineupEditor("home"));
@@ -431,6 +435,7 @@ function startConfiguredMatch() {
   simulation.startNewMatch({
     teamCodes: [homeCode, awayCode],
     matchSeconds: Number(ui.matchLengthSelect.value) || MATCH.seconds,
+    autoSubstitutionsEnabled: ui.autoSubstitutionToggle.checked,
     matchConfig: {
       home: {
         formation: ui.homeFormationSelect.value,
@@ -468,9 +473,21 @@ function toggleSetupPanel() {
 }
 
 function setSetupPanelOpen(isOpen) {
+  if (isOpen) setTacticsPanelOpen(false);
   ui.setupPanel.classList.toggle("is-hidden", !isOpen);
   ui.settingsToggle.setAttribute("aria-expanded", String(isOpen));
   ui.settingsToggle.textContent = isOpen ? "收起" : "设置";
+}
+
+function toggleTacticsPanel() {
+  setTacticsPanelOpen(ui.tacticsPanel.classList.contains("is-hidden"));
+}
+
+function setTacticsPanelOpen(isOpen) {
+  if (isOpen) setSetupPanelOpen(false);
+  ui.tacticsPanel.classList.toggle("is-hidden", !isOpen);
+  ui.tacticsToggle.setAttribute("aria-expanded", String(isOpen));
+  ui.tacticsToggle.textContent = isOpen ? "收起" : "战术";
 }
 
 updateUi(simulation.getSnapshot());

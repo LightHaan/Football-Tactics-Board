@@ -1,4 +1,4 @@
-import { FIELD, PLAYER_RENDERING } from "./data.js?v=29";
+import { FIELD, PLAYER_RENDERING } from "./data.js?v=30";
 
 const GOAL_TOP = FIELD.height / 2 - FIELD.goalWidth / 2;
 const GOAL_BOTTOM = FIELD.height / 2 + FIELD.goalWidth / 2;

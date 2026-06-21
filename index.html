@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>足球战术板</title>
-    <link rel="stylesheet" href="./styles.css?v=29" />
+    <link rel="stylesheet" href="./styles.css?v=30" />
   </head>
   <body>
     <main class="match-shell" aria-label="足球战术板">
@@ -43,6 +43,7 @@
       </section>
 
       <button id="settingsToggle" class="settings-toggle" type="button" aria-expanded="false" aria-controls="setupPanel">设置</button>
+      <button id="tacticsToggle" class="settings-toggle tactics-toggle" type="button" aria-expanded="false" aria-controls="tacticsPanel">战术</button>
 
       <section id="setupPanel" class="setup-panel is-hidden" aria-label="比赛设置">
         <label class="setup-field">
@@ -53,6 +54,30 @@
           <span>客队</span>
           <select id="awayTeamSelect"></select>
         </label>
+        <label class="setup-field setup-time">
+          <span>时间</span>
+          <select id="matchLengthSelect">
+            <option value="60">1 分钟</option>
+            <option value="180">3 分钟</option>
+            <option value="300">5 分钟</option>
+            <option value="600" selected>10 分钟</option>
+            <option value="900">15 分钟</option>
+          </select>
+        </label>
+        <label class="setup-field sound-field">
+          <span>音效</span>
+          <input id="soundToggle" type="checkbox" checked />
+        </label>
+        <label class="setup-field auto-substitution-field">
+          <span>自动换人</span>
+          <input id="autoSubstitutionToggle" type="checkbox" checked />
+        </label>
+        <button id="startMatchButton" class="start-button" type="button">开始</button>
+      </section>
+
+      <canvas id="pitchCanvas" aria-label="比赛动画画布"></canvas>
+
+      <section id="tacticsPanel" class="tactics-panel is-hidden" aria-label="战术与换人">
         <label class="setup-field">
           <span>主队阵型</span>
           <select id="homeFormationSelect"></select>
@@ -69,20 +94,6 @@
           <span>客队战术</span>
           <select id="awayTacticSelect"></select>
         </label>
-        <label class="setup-field setup-time">
-          <span>时间</span>
-          <select id="matchLengthSelect">
-            <option value="60">1 分钟</option>
-            <option value="180">3 分钟</option>
-            <option value="300">5 分钟</option>
-            <option value="600" selected>10 分钟</option>
-            <option value="900">15 分钟</option>
-          </select>
-        </label>
-        <label class="setup-field sound-field">
-          <span>音效</span>
-          <input id="soundToggle" type="checkbox" checked />
-        </label>
         <div class="lineup-panel" aria-label="首发设置">
           <section class="lineup-group">
             <h2>主队首发</h2>
@@ -93,25 +104,19 @@
             <div id="awayLineupEditor" class="lineup-editor"></div>
           </section>
         </div>
-        <button id="startMatchButton" class="start-button" type="button">开始</button>
-      </section>
-
-      <canvas id="pitchCanvas" aria-label="比赛动画画布"></canvas>
-
-      <section id="substitutionPanel" class="substitution-panel" aria-label="比赛换人">
         <div class="substitution-head">
           <span>换人</span>
           <span id="substitutionCount">0/5</span>
         </div>
-        <label class="substitution-field">
+        <label class="substitution-field substitution-team-field">
           <span>球队</span>
           <select id="substitutionTeamSelect"></select>
         </label>
-        <label class="substitution-field">
+        <label class="substitution-field substitution-player-field">
           <span>下场</span>
           <select id="substitutionOutSelect"></select>
         </label>
-        <label class="substitution-field">
+        <label class="substitution-field substitution-player-field">
           <span>上场</span>
           <select id="substitutionInSelect"></select>
         </label>
@@ -134,6 +139,6 @@
       </aside>
     </main>
 
-    <script type="module" src="./src/app.js?v=29"></script>
+    <script type="module" src="./src/app.js?v=30"></script>
   </body>
 </html>

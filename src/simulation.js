@@ -1,4 +1,4 @@
-import { DISCIPLINE, FIELD, FOULS, MATCH, MATCH_TEAM_CODES, OFFSIDE, RESTART_EVENTS, SUBSTITUTIONS, buildTeams } from "./data.js?v=29";
+import { DISCIPLINE, FIELD, FOULS, MATCH, MATCH_TEAM_CODES, OFFSIDE, RESTART_EVENTS, SUBSTITUTIONS, buildTeams } from "./data.js?v=30";
 
 const CENTER_Y = FIELD.height / 2;
 const GOAL_TOP = CENTER_Y - FIELD.goalWidth / 2;
@@ -18,6 +18,7 @@ export class MatchSimulation extends EventTarget {
     this.matchTeamCodes = options.teamCodes ?? MATCH_TEAM_CODES;
     this.matchSeconds = options.matchSeconds ?? MATCH.seconds;
     this.matchConfig = options.matchConfig ?? {};
+    this.autoSubstitutionsEnabled = options.autoSubstitutionsEnabled ?? true;
     this.resetMatch();
   }
 
@@ -25,6 +26,9 @@ export class MatchSimulation extends EventTarget {
     if (options.teamCodes) this.matchTeamCodes = options.teamCodes;
     if (options.matchSeconds) this.matchSeconds = options.matchSeconds;
     if (options.matchConfig) this.matchConfig = options.matchConfig;
+    if (typeof options.autoSubstitutionsEnabled === "boolean") {
+      this.autoSubstitutionsEnabled = options.autoSubstitutionsEnabled;
+    }
     this.teams = buildTeams(this.matchTeamCodes, this.matchConfig);
     this.players = this.teams.flatMap((team) => team.players);
     this.clock = 0;
@@ -37,7 +41,7 @@ export class MatchSimulation extends EventTarget {
     this.offside = this.createOffsidePlan();
     this.fouls = this.createFoulState();
     this.restartStats = this.createRestartStats();
-    this.substitutionPlan = this.createSubstitutionPlan();
+    this.substitutionPlan = this.autoSubstitutionsEnabled ? this.createSubstitutionPlan() : null;
     this.matchNotice = null;
     this.referee = this.createReferee();
     this.ball = {
