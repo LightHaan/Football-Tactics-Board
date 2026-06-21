@@ -1,6 +1,6 @@
-import { MatchSimulation } from "./simulation.js?v=21";
-import { FootballRenderer } from "./render.js?v=21";
-import { MatchAudio } from "./audio.js?v=21";
+import { MatchSimulation } from "./simulation.js?v=29";
+import { FootballRenderer } from "./render.js?v=29";
+import { MatchAudio } from "./audio.js?v=29";
 import {
   COUNTRY_DATABASE,
   COUNTRY_OPTIONS,
@@ -8,8 +8,9 @@ import {
   FORMATIONS,
   MATCH,
   MATCH_TEAM_CODES,
+  SUBSTITUTIONS,
   TACTIC_OPTIONS,
-} from "./data.js?v=21";
+} from "./data.js?v=29";
 
 const canvas = document.querySelector("#pitchCanvas");
 const renderer = new FootballRenderer(canvas);
@@ -52,6 +53,12 @@ const ui = {
   matchLengthSelect: document.querySelector("#matchLengthSelect"),
   soundToggle: document.querySelector("#soundToggle"),
   startMatchButton: document.querySelector("#startMatchButton"),
+  substitutionTeamSelect: document.querySelector("#substitutionTeamSelect"),
+  substitutionOutSelect: document.querySelector("#substitutionOutSelect"),
+  substitutionInSelect: document.querySelector("#substitutionInSelect"),
+  substitutionButton: document.querySelector("#substitutionButton"),
+  substitutionCount: document.querySelector("#substitutionCount"),
+  substitutionStatus: document.querySelector("#substitutionStatus"),
 };
 
 let lastFrame = performance.now();
@@ -59,6 +66,12 @@ let lastSoundEvent = "";
 const lineupSelects = {
   home: [],
   away: [],
+};
+const substitutionControls = {
+  signature: "",
+  selectedTeamId: "home",
+  selectedOutId: "",
+  selectedInId: "",
 };
 const sideControls = {
   home: {
@@ -95,6 +108,10 @@ ui.homeFormationSelect.addEventListener("change", () => renderLineupEditor("home
 ui.awayFormationSelect.addEventListener("change", () => renderLineupEditor("away"));
 ui.soundToggle.addEventListener("change", handleSoundToggle);
 ui.startMatchButton.addEventListener("click", startConfiguredMatch);
+ui.substitutionTeamSelect.addEventListener("change", handleSubstitutionTeamChanged);
+ui.substitutionOutSelect.addEventListener("change", handleSubstitutionPlayerChanged);
+ui.substitutionInSelect.addEventListener("change", handleSubstitutionPlayerChanged);
+ui.substitutionButton.addEventListener("click", handleManualSubstitution);
 
 function frame(now) {
   const dt = Math.max(0, (now - lastFrame) / 1000);
@@ -128,6 +145,7 @@ function updateUi(snapshot) {
   ui.event.textContent = snapshot.eventText;
   ui.lastResult.textContent = snapshot.lastResult ? `上一局：${snapshot.lastResult}` : "上一局：暂无";
   updateMatchNotice(snapshot.notice);
+  updateSubstitutionControls(snapshot);
   playEventSound(snapshot.eventText);
 }
 
@@ -136,6 +154,9 @@ function updateMatchNotice(notice) {
   ui.matchNotice.classList.toggle("is-hidden", !isVisible);
   ui.matchNotice.classList.toggle("is-offside", isVisible && notice.type === "offside");
   ui.matchNotice.classList.toggle("is-yellow", isVisible && notice.type === "yellow");
+  ui.matchNotice.classList.toggle("is-red", isVisible && notice.type === "red");
+  ui.matchNotice.classList.toggle("is-penalty", isVisible && notice.type === "penalty");
+  ui.matchNotice.classList.toggle("is-free-kick", isVisible && notice.type === "freeKick");
   ui.matchNotice.classList.toggle("is-substitution", isVisible && notice.type === "substitution");
   if (!isVisible) return;
   ui.noticeTitle.textContent = notice.title;
@@ -289,6 +310,109 @@ function syncLineupAvailability(side) {
   }
 }
 
+function updateSubstitutionControls(snapshot, force = false) {
+  const teams = snapshot.teams ?? [];
+  if (!teams.length) return;
+  if (!teams.some((team) => team.id === substitutionControls.selectedTeamId)) {
+    substitutionControls.selectedTeamId = teams[0].id;
+  }
+
+  const signature = [
+    snapshot.state,
+    substitutionControls.selectedTeamId,
+    teams
+      .map(
+        (team) =>
+          `${team.id}:${team.substitutionsUsed}:${team.players.map((player) => player.id).join(",")}:${(team.bench ?? []).map((player) => player.id).join(",")}`,
+      )
+      .join("|"),
+  ].join("::");
+
+  if (!force && substitutionControls.signature === signature) {
+    updateSubstitutionButtonState(snapshot);
+    return;
+  }
+  substitutionControls.signature = signature;
+
+  const team = teams.find((currentTeam) => currentTeam.id === substitutionControls.selectedTeamId) ?? teams[0];
+  substitutionControls.selectedTeamId = team.id;
+  populateSubstitutionTeamSelect(teams, team.id);
+  populateSubstitutionPlayerSelect(ui.substitutionOutSelect, team.players, substitutionControls.selectedOutId);
+  populateSubstitutionPlayerSelect(ui.substitutionInSelect, team.bench ?? [], substitutionControls.selectedInId);
+  substitutionControls.selectedOutId = ui.substitutionOutSelect.value;
+  substitutionControls.selectedInId = ui.substitutionInSelect.value;
+  ui.substitutionCount.textContent = `${team.substitutionsUsed}/${SUBSTITUTIONS.maxPerTeam}`;
+  updateSubstitutionButtonState(snapshot);
+}
+
+function populateSubstitutionTeamSelect(teams, selectedTeamId) {
+  const fragment = document.createDocumentFragment();
+  for (const team of teams) {
+    const option = document.createElement("option");
+    option.value = team.id;
+    option.textContent = `${team.shortName} (${team.substitutionsUsed}/${SUBSTITUTIONS.maxPerTeam})`;
+    option.selected = team.id === selectedTeamId;
+    fragment.append(option);
+  }
+  ui.substitutionTeamSelect.replaceChildren(fragment);
+}
+
+function populateSubstitutionPlayerSelect(select, players, selectedId) {
+  const fragment = document.createDocumentFragment();
+  for (const player of players) {
+    const option = document.createElement("option");
+    option.value = player.id;
+    option.textContent = `${player.number} ${player.name} / ${player.position}`;
+    option.selected = player.id === selectedId;
+    fragment.append(option);
+  }
+  select.replaceChildren(fragment);
+}
+
+function updateSubstitutionButtonState(snapshot) {
+  const team = snapshot.teams.find((currentTeam) => currentTeam.id === substitutionControls.selectedTeamId);
+  const hasSelection = Boolean(ui.substitutionOutSelect.value && ui.substitutionInSelect.value);
+  const canUse = team && snapshot.state !== "fullTime" && team.substitutionsUsed < SUBSTITUTIONS.maxPerTeam && hasSelection;
+  ui.substitutionButton.disabled = !canUse;
+}
+
+function handleSubstitutionTeamChanged() {
+  substitutionControls.selectedTeamId = ui.substitutionTeamSelect.value;
+  substitutionControls.selectedOutId = "";
+  substitutionControls.selectedInId = "";
+  updateSubstitutionControls(simulation.getSnapshot(), true);
+}
+
+function handleSubstitutionPlayerChanged() {
+  substitutionControls.selectedOutId = ui.substitutionOutSelect.value;
+  substitutionControls.selectedInId = ui.substitutionInSelect.value;
+  updateSubstitutionButtonState(simulation.getSnapshot());
+}
+
+function handleManualSubstitution() {
+  audio.unlock();
+  substitutionControls.selectedOutId = ui.substitutionOutSelect.value;
+  substitutionControls.selectedInId = ui.substitutionInSelect.value;
+  const result = simulation.performManualSubstitution(
+    substitutionControls.selectedTeamId,
+    substitutionControls.selectedOutId,
+    substitutionControls.selectedInId,
+  );
+  setSubstitutionStatus(result.message, result.ok);
+  if (result.ok) {
+    substitutionControls.selectedOutId = "";
+    substitutionControls.selectedInId = "";
+    substitutionControls.signature = "";
+  }
+  updateUi(simulation.getSnapshot());
+}
+
+function setSubstitutionStatus(message, isSuccess) {
+  ui.substitutionStatus.textContent = message ?? "";
+  ui.substitutionStatus.classList.toggle("is-success", Boolean(isSuccess));
+  ui.substitutionStatus.classList.toggle("is-error", Boolean(message && !isSuccess));
+}
+
 function collectLineupIds(side) {
   return lineupSelects[side].map((select) => select.value).filter(Boolean);
 }
@@ -320,6 +444,10 @@ function startConfiguredMatch() {
       },
     },
   });
+  setSubstitutionStatus("", false);
+  substitutionControls.selectedOutId = "";
+  substitutionControls.selectedInId = "";
+  substitutionControls.signature = "";
   updateUi(simulation.getSnapshot());
   setSetupPanelOpen(false);
 }

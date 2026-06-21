@@ -1,4 +1,4 @@
-import { DISCIPLINE, FIELD, MATCH, MATCH_TEAM_CODES, OFFSIDE, buildTeams } from "./data.js?v=21";
+import { DISCIPLINE, FIELD, FOULS, MATCH, MATCH_TEAM_CODES, OFFSIDE, RESTART_EVENTS, SUBSTITUTIONS, buildTeams } from "./data.js?v=29";
 
 const CENTER_Y = FIELD.height / 2;
 const GOAL_TOP = CENTER_Y - FIELD.goalWidth / 2;
@@ -35,6 +35,8 @@ export class MatchSimulation extends EventTarget {
     this.restartContext = null;
     this.discipline = this.createDisciplinePlan();
     this.offside = this.createOffsidePlan();
+    this.fouls = this.createFoulState();
+    this.restartStats = this.createRestartStats();
     this.substitutionPlan = this.createSubstitutionPlan();
     this.matchNotice = null;
     this.referee = this.createReferee();
@@ -53,6 +55,7 @@ export class MatchSimulation extends EventTarget {
       quality: 0,
       shotTeamId: null,
       shotPlayer: null,
+      passKind: null,
       looseTimer: 0,
       stallTimer: 0,
       lastX: FIELD.width / 2,
@@ -66,6 +69,7 @@ export class MatchSimulation extends EventTarget {
       goalkeeperHoldTimer: 0,
       releaseIgnorePlayerId: null,
       releaseIgnoreTimer: 0,
+      restartKind: null,
     };
     this.kickoff(Math.random() > 0.5 ? this.teams[0] : this.teams[1], "开球");
   }
@@ -77,6 +81,7 @@ export class MatchSimulation extends EventTarget {
       this.pauseTimer -= dt;
       this.updateMatchNotice(dt);
       this.updateOffsideState(dt);
+      this.updateFoulState(dt);
       this.updateReferee(dt);
       if (this.state === "restartPause") this.setRestartTargets();
       else this.setRestingTargets();
@@ -100,6 +105,7 @@ export class MatchSimulation extends EventTarget {
     this.clock += dt;
     this.updateMatchNotice(dt);
     this.updateOffsideState(dt);
+    this.updateFoulState(dt);
     if (this.clock >= this.matchSeconds) {
       this.finishMatch();
       return;
@@ -115,18 +121,22 @@ export class MatchSimulation extends EventTarget {
     this.updateBall(dt);
     this.resolveCarrierStall(dt);
     this.checkPressure(dt);
+    this.checkRestartRhythmEvents(dt);
     this.updatePhaseText();
   }
 
   createDisciplinePlan() {
     const earliest = Math.min(12, this.matchSeconds * 0.18);
     const latest = Math.max(earliest + 1, this.matchSeconds * 0.82);
+    const redEarliest = Math.min(30, this.matchSeconds * 0.28);
+    const redLatest = Math.max(redEarliest + 1, this.matchSeconds * 0.86);
     return {
       yellowCardsPerMatch: DISCIPLINE.yellowCardsPerMatch,
       redCardsPerMatch: DISCIPLINE.redCardsPerMatch,
       yellowIssued: 0,
       redIssued: 0,
       nextYellowAt: DISCIPLINE.yellowCardsPerMatch > 0 ? rand(earliest, latest) : Infinity,
+      nextRedAt: DISCIPLINE.redCardsPerMatch > 0 ? rand(redEarliest, redLatest) : Infinity,
     };
   }
 
@@ -135,6 +145,23 @@ export class MatchSimulation extends EventTarget {
       enabled: OFFSIDE.enabled,
       cooldown: 0,
       count: 0,
+    };
+  }
+
+  createFoulState() {
+    return {
+      enabled: FOULS.enabled,
+      cooldown: 0,
+      count: 0,
+      penalties: 0,
+    };
+  }
+
+  createRestartStats() {
+    return {
+      corners: 0,
+      throwIns: 0,
+      goalKicks: 0,
     };
   }
 
@@ -157,6 +184,7 @@ export class MatchSimulation extends EventTarget {
       targetX: FIELD.width / 2,
       targetY: CENTER_Y + 8,
       cardFlashTimer: 0,
+      cardColor: "#ffd532",
       whistleTimer: 0,
     };
   }
@@ -179,6 +207,7 @@ export class MatchSimulation extends EventTarget {
     taker.y = CENTER_Y + rand(-1.8, 1.8);
     this.ball.x = FIELD.width / 2;
     this.ball.y = CENTER_Y;
+    this.ball.restartKind = null;
     this.takePossession(taker);
     this.eventText = `${team.shortName} ${message}，本局主打${team.tactic.name}`;
     this.emitUpdate();
@@ -212,6 +241,11 @@ export class MatchSimulation extends EventTarget {
     this.offside.cooldown = Math.max(0, this.offside.cooldown - dt);
   }
 
+  updateFoulState(dt) {
+    if (!this.fouls) return;
+    this.fouls.cooldown = Math.max(0, this.fouls.cooldown - dt);
+  }
+
   showMatchNotice(type, title, message, teamId = null, duration = 2.4) {
     this.matchNotice = {
       type,
@@ -224,34 +258,132 @@ export class MatchSimulation extends EventTarget {
   }
 
   checkDisciplineEvents() {
-    if (this.discipline.yellowIssued >= this.discipline.yellowCardsPerMatch) return;
-    if (this.clock < this.discipline.nextYellowAt) return;
-    this.issueRandomYellowCard();
+    if (this.state !== "playing") return;
+    if (this.discipline.yellowIssued < this.discipline.yellowCardsPerMatch && this.clock >= this.discipline.nextYellowAt) {
+      this.issueRandomYellowCard();
+    }
+    if (this.state !== "playing") return;
+    if (this.discipline.redIssued < this.discipline.redCardsPerMatch && this.clock >= this.discipline.nextRedAt) {
+      this.issueRandomRedCard();
+    }
   }
 
   issueRandomYellowCard() {
-    const candidates = this.players.filter((player) => player.role !== "GK");
+    const protectedIds = this.getProtectedPlayerIds();
+    const candidates = this.players.filter((player) => player.role !== "GK" && !protectedIds.has(player.id));
     const weighted = candidates.map((player) => ({
       player,
       score:
         ({ CB: 4.5, FB: 3.4, DM: 4.2, CM: 2.8, W: 1.7, AM: 1.4, ST: 1.2 }[player.role] ?? 2) +
+        (player.yellowCards ? 1.1 : 0) +
         rand(0, 2.2),
     }));
     const picked = pickWeighted(weighted);
     if (!picked) return;
-    const player = picked.player;
+    this.issueCard(picked.player, "yellow");
+    this.scheduleNextDisciplineCard("yellow");
+  }
+
+  issueRandomRedCard() {
+    const protectedIds = this.getProtectedPlayerIds();
+    const candidates = this.players.filter((player) => player.role !== "GK" && !protectedIds.has(player.id));
+    const weighted = candidates.map((player) => ({
+      player,
+      score:
+        ({ CB: 3.8, FB: 3.2, DM: 3.5, CM: 2.3, W: 1.4, AM: 1.2, ST: 1.1 }[player.role] ?? 2) +
+        rand(0, 1.8),
+    }));
+    const picked = pickWeighted(weighted);
+    if (!picked) return;
+    this.issueCard(picked.player, "red");
+    this.scheduleNextDisciplineCard("red");
+  }
+
+  scheduleNextDisciplineCard(kind) {
+    const issuedKey = kind === "red" ? "redIssued" : "yellowIssued";
+    const targetKey = kind === "red" ? "redCardsPerMatch" : "yellowCardsPerMatch";
+    const nextKey = kind === "red" ? "nextRedAt" : "nextYellowAt";
+    if (this.discipline[issuedKey] >= this.discipline[targetKey]) {
+      this.discipline[nextKey] = Infinity;
+      return;
+    }
+    const remainingWindow = Math.max(1, this.matchSeconds - this.clock - 5);
+    this.discipline[nextKey] = Math.min(this.matchSeconds - 4, this.clock + rand(8, remainingWindow));
+  }
+
+  issueCard(player, cardType) {
+    if (!player || player.redCards) return { type: "none", text: "" };
     const team = this.getTeam(player.teamId);
-    team.yellowCards += 1;
-    player.yellowCards = (player.yellowCards ?? 0) + 1;
-    this.discipline.yellowIssued += 1;
-    this.referee.cardFlashTimer = 2.2;
-    this.referee.whistleTimer = 1.1;
+    if (!team) return { type: "none", text: "" };
+    const isRed = cardType === "red";
+
+    if (!isRed) {
+      team.yellowCards += 1;
+      player.yellowCards = (player.yellowCards ?? 0) + 1;
+      this.discipline.yellowIssued += 1;
+      const yellowLimit = DISCIPLINE.yellowCardsBeforeRed ?? 2;
+      if (player.yellowCards >= yellowLimit) {
+        return this.sendOffPlayer(player, team, { secondYellow: true });
+      }
+
+      this.referee.cardFlashTimer = 2.2;
+      this.referee.cardColor = "#ffd532";
+      this.referee.whistleTimer = 1.1;
+      this.referee.x = lerp(this.referee.x, player.x, 0.45);
+      this.referee.y = lerp(this.referee.y, player.y, 0.45);
+      this.eventText = `${team.shortName} ${playerLabel(player)}吃到黄牌`;
+      this.phaseText = "黄牌";
+      this.showMatchNotice("yellow", "黄牌", `${team.shortName} ${playerLabel(player)}`, team.id, 2.8);
+      this.emitUpdate();
+      return { type: "yellow", text: "黄牌" };
+    }
+
+    return this.sendOffPlayer(player, team, { straightRed: true });
+  }
+
+  sendOffPlayer(player, team, reason = {}) {
+    if (team.players.length <= 7) {
+      this.referee.whistleTimer = 1.1;
+      this.eventText = `${team.shortName} ${playerLabel(player)}动作过大，裁判口头警告`;
+      this.phaseText = "犯规";
+      this.emitUpdate();
+      return { type: "warning", text: "口头警告" };
+    }
+    team.redCards += 1;
+    player.redCards = 1;
+    this.discipline.redIssued += 1;
+    const title = reason.secondYellow ? "两黄变红" : "红牌";
+    const text = reason.secondYellow ? "两黄变一红" : "红牌罚下";
+    this.referee.cardFlashTimer = 2.4;
+    this.referee.cardColor = "#e93636";
+    this.referee.whistleTimer = 1.25;
     this.referee.x = lerp(this.referee.x, player.x, 0.45);
     this.referee.y = lerp(this.referee.y, player.y, 0.45);
-    this.eventText = `${team.shortName} ${playerLabel(player)}吃到黄牌`;
-    this.phaseText = "黄牌";
-    this.showMatchNotice("yellow", "黄牌", `${team.shortName} ${playerLabel(player)}`, team.id, 2.8);
+    this.eventText = `${team.shortName} ${playerLabel(player)}${text}`;
+    this.phaseText = title;
+    this.showMatchNotice("red", title, `${team.shortName} ${playerLabel(player)}`, team.id, 3.2);
+    this.removePlayerFromMatch(player, team);
     this.emitUpdate();
+    return { type: "red", text };
+  }
+
+  removePlayerFromMatch(player, team) {
+    team.players = team.players.filter((current) => current.id !== player.id);
+    this.players = this.teams.flatMap((currentTeam) => currentTeam.players);
+    if (this.ball.owner?.id === player.id) {
+      this.ball.owner = null;
+      this.ball.mode = "loose";
+      this.ball.vx = 0;
+      this.ball.vy = 0;
+      this.ball.speed = 0;
+      this.ball.restartKind = null;
+    }
+    if (this.ball.targetPlayer?.id === player.id) this.ball.targetPlayer = null;
+    if (this.ball.shotPlayer?.id === player.id) this.ball.shotPlayer = null;
+  }
+
+  getProtectedPlayerIds() {
+    return new Set([this.ball.owner?.id, this.ball.targetPlayer?.id, this.ball.shotPlayer?.id].filter(Boolean));
   }
 
   checkSubstitutionEvents() {
@@ -265,13 +397,33 @@ export class MatchSimulation extends EventTarget {
   }
 
   performRandomSubstitution(team) {
+    if (team.substitutionsUsed >= SUBSTITUTIONS.maxPerTeam) return false;
     const incoming = this.pickSubstitute(team);
     if (!incoming) return false;
     const outgoing = this.pickOutgoingForSubstitution(team, incoming);
     if (!outgoing) return false;
+    const result = this.performSubstitution(team, incoming, outgoing);
+    return result.ok;
+  }
 
+  performManualSubstitution(teamId, outgoingId, incomingId) {
+    const team = this.getTeam(teamId);
+    if (!team) return { ok: false, message: "没有找到球队" };
+    if (this.state === "fullTime") return { ok: false, message: "全场结束后不能换人" };
+    if (team.substitutionsUsed >= SUBSTITUTIONS.maxPerTeam) return { ok: false, message: "换人次数已用完" };
+    const outgoing = team.players.find((player) => player.id === outgoingId);
+    if (!outgoing) return { ok: false, message: "没有找到要换下的球员" };
+    const incoming = (team.bench ?? []).find((player) => player.id === incomingId);
+    if (!incoming) return { ok: false, message: "没有找到替补球员" };
+    if (this.isPlayerInActiveBallAction(outgoing)) {
+      return { ok: false, message: `${playerLabel(outgoing)}正在处理球，稍后再换` };
+    }
+    return this.performSubstitution(team, incoming, outgoing, { manual: true });
+  }
+
+  performSubstitution(team, incoming, outgoing, options = {}) {
     const playerIndex = team.players.findIndex((player) => player.id === outgoing.id);
-    if (playerIndex < 0) return false;
+    if (playerIndex < 0) return { ok: false, message: "没有找到要换下的球员" };
 
     const replacement = {
       ...outgoing,
@@ -303,11 +455,16 @@ export class MatchSimulation extends EventTarget {
     this.players = this.teams.flatMap((currentTeam) => currentTeam.players);
 
     this.phaseText = "换人";
-    this.eventText = `${team.shortName} 换人：${playerLabel(replacement)}换下${playerLabel(outgoing)}`;
+    const prefix = options.manual ? "手动换人" : "换人";
+    this.eventText = `${team.shortName} ${prefix}：${playerLabel(replacement)}换下${playerLabel(outgoing)}`;
     this.referee.whistleTimer = 0.65;
     this.showMatchNotice("substitution", "换人", `${team.shortName} ${playerLabel(replacement)}上，${playerLabel(outgoing)}下`, team.id, 3);
     this.emitUpdate();
-    return true;
+    return { ok: true, message: `${team.shortName} ${replacement.name} 上场` };
+  }
+
+  isPlayerInActiveBallAction(player) {
+    return [this.ball.owner?.id, this.ball.targetPlayer?.id, this.ball.shotPlayer?.id, this.restartContext?.takerId].includes(player.id);
   }
 
   pickSubstitute(team) {
@@ -340,6 +497,8 @@ export class MatchSimulation extends EventTarget {
     this.eventText = `全场结束，比分 ${home.score}:${away.score}`;
     this.ball.owner = null;
     this.ball.mode = "loose";
+    this.ball.passKind = null;
+    this.ball.restartKind = null;
     this.restartContext = null;
     this.emitUpdate();
   }
@@ -350,6 +509,8 @@ export class MatchSimulation extends EventTarget {
     this.ball.teamId = player.teamId;
     this.ball.targetPlayer = null;
     this.ball.shotPlayer = null;
+    this.ball.passKind = null;
+    this.ball.restartKind = null;
     this.ball.vx = 0;
     this.ball.vy = 0;
     this.ball.speed = 0;
@@ -1048,7 +1209,9 @@ export class MatchSimulation extends EventTarget {
     this.ball.mode = "loose";
     this.ball.owner = null;
     this.ball.targetPlayer = null;
+    this.ball.passKind = null;
     this.ball.teamId = defendingTeam.id;
+    this.ball.restartKind = null;
     this.ball.vx = 0;
     this.ball.vy = 0;
     this.ball.speed = 0;
@@ -1079,6 +1242,8 @@ export class MatchSimulation extends EventTarget {
     this.ball.teamId = team.id;
     this.ball.targetPlayer = to;
     this.ball.shotPlayer = null;
+    this.ball.passKind = context.kind ?? "pass";
+    this.ball.restartKind = null;
     this.ball.targetX = clamp(lead.x, 1.5, FIELD.width - 1.5);
     this.ball.targetY = clamp(lead.y, 1.5, FIELD.height - 1.5);
     this.ball.vx = direction.x * speed;
@@ -1097,18 +1262,22 @@ export class MatchSimulation extends EventTarget {
 
   shoot(player, team, pressure, options = {}) {
     const longShot = options.longShot === true;
+    const isPenalty = options.penalty === true;
+    const isDirectFreeKick = options.directFreeKick === true;
     const goalX = team.direction === 1 ? FIELD.width + 1 : -1;
     const distanceToGoal = Math.abs((team.direction === 1 ? FIELD.width : 0) - player.x);
     const centerBias = 1 - clamp(Math.abs(player.y - CENTER_Y) / 28, 0, 1);
+    const maxAccuracy = isPenalty ? 0.88 : isDirectFreeKick ? 0.62 : longShot ? 0.42 : 0.68;
     const accuracy = clamp(
       player.attributes.shooting / 135 +
         centerBias * 0.18 -
         pressure * 0.2 -
         distanceToGoal * 0.016 +
         (longShot ? -0.06 : 0) +
+        (options.accuracyBonus ?? 0) +
         rand(-0.18, 0.12),
       0.08,
-      longShot ? 0.42 : 0.68,
+      maxAccuracy,
     );
     const onFrame = chance(accuracy);
     const targetY = onFrame
@@ -1122,11 +1291,12 @@ export class MatchSimulation extends EventTarget {
         (1 - distanceToGoal / 28) * 0.18 +
         (onFrame ? 0.08 : -0.18) +
         (longShot ? -0.06 : 0) +
+        (options.qualityBonus ?? 0) +
         rand(-0.12, 0.1),
       0.08,
-      0.86,
+      isPenalty ? 0.94 : 0.86,
     );
-    const speed = clamp(31 + player.attributes.shooting * 0.17 + (longShot ? 2.2 : 0) + rand(-2, 3), 28, 48);
+    const speed = clamp(31 + player.attributes.shooting * 0.17 + (longShot ? 2.2 : 0) + (options.speedBonus ?? 0) + rand(-2, 3), 28, 49);
 
     this.ball.mode = "shot";
     this.ball.owner = null;
@@ -1134,6 +1304,8 @@ export class MatchSimulation extends EventTarget {
     this.ball.shotTeamId = team.id;
     this.ball.targetPlayer = null;
     this.ball.shotPlayer = player;
+    this.ball.passKind = null;
+    this.ball.restartKind = options.restartKind ?? null;
     this.ball.targetX = goalX;
     this.ball.targetY = targetY;
     this.ball.vx = direction.x * speed;
@@ -1146,7 +1318,7 @@ export class MatchSimulation extends EventTarget {
     this.ball.lastY = this.ball.y;
     this.ball.trail = [{ x: player.x, y: player.y }];
     player.decisionTimer = rand(1.0, 1.6);
-    this.eventText = longShot ? `${team.shortName} ${playerLabel(player)}尝试远射` : `${team.shortName} ${playerLabel(player)}起脚射门`;
+    this.eventText = options.eventText ?? (longShot ? `${team.shortName} ${playerLabel(player)}尝试远射` : `${team.shortName} ${playerLabel(player)}起脚射门`);
     this.emitUpdate();
   }
 
@@ -1370,6 +1542,8 @@ export class MatchSimulation extends EventTarget {
     this.ball.owner = null;
     this.ball.targetPlayer = null;
     this.ball.teamId = team.id;
+    this.ball.passKind = null;
+    this.ball.restartKind = null;
     this.ball.vx = direction.x * speed;
     this.ball.vy = direction.y * speed;
     this.ball.looseTimer = 0;
@@ -1389,6 +1563,8 @@ export class MatchSimulation extends EventTarget {
     this.ball.owner = null;
     this.ball.targetPlayer = null;
     this.ball.teamId = team.id;
+    this.ball.passKind = null;
+    this.ball.restartKind = null;
     this.ball.vx = direction.x * speed;
     this.ball.vy = direction.y * speed;
     this.ball.looseTimer = 0;
@@ -1412,6 +1588,8 @@ export class MatchSimulation extends EventTarget {
     this.ball.owner = null;
     this.ball.targetPlayer = null;
     this.ball.teamId = team.id;
+    this.ball.passKind = null;
+    this.ball.restartKind = null;
     this.ball.vx = direction.x * speed;
     this.ball.vy = direction.y * speed;
     this.ball.speed = speed;
@@ -1433,6 +1611,7 @@ export class MatchSimulation extends EventTarget {
       if (opponent.tackleTimer > 0) continue;
       const d = dist(opponent, this.ball);
       if (d < 2.2) {
+        if (this.tryBlockCrossForCorner(opponent, d)) return;
         const interceptChance = clamp((opponent.attributes.defense / 100) * (1 - d / 2.4) * (1 - this.ball.quality * 0.45), 0.06, 0.74);
         opponent.tackleTimer = rand(0.4, 1.1);
         if (chance(interceptChance)) {
@@ -1464,6 +1643,31 @@ export class MatchSimulation extends EventTarget {
     }
   }
 
+  tryBlockCrossForCorner(defender, distanceToBall) {
+    if (this.ball.passKind !== "cross" || !this.ball.targetPlayer) return false;
+    const attackingTeam = this.getTeam(this.ball.teamId);
+    const defendingTeam = this.getTeam(defender.teamId);
+    if (!attackingTeam || !defendingTeam || attackingTeam.id === defendingTeam.id) return false;
+    const attackingProgress = attackingTeam.direction * (this.ball.x - FIELD.width / 2);
+    if (attackingProgress < 16) return false;
+    const blockChance = clamp(
+      RESTART_EVENTS.blockedCrossCornerChance *
+        (1 - distanceToBall / 2.4) *
+        (defender.attributes.defense / 92) *
+        (this.restartStats.corners === 0 && this.clock > this.matchSeconds * RESTART_EVENTS.cornerCatchupAfter ? 1.7 : 1),
+      0,
+      0.62,
+    );
+    if (!chance(blockChance)) return false;
+    defender.tackleTimer = rand(0.5, 1.1);
+    this.referee.whistleTimer = 0.75;
+    return this.scheduleForcedCorner(
+      attackingTeam,
+      this.ball,
+      `${defendingTeam.shortName} ${playerLabel(defender)}封堵传中，${attackingTeam.shortName} 获得角球`,
+    );
+  }
+
   trackGoalkeepersOnShot() {
     const defendingTeam = this.teams.find((team) => team.id !== this.ball.shotTeamId);
     const keeper = defendingTeam.players.find((player) => player.role === "GK");
@@ -1493,7 +1697,7 @@ export class MatchSimulation extends EventTarget {
     const keeper = defendingTeam.players.find((player) => player.role === "GK");
     const savePoint = { x: attackingTeam.direction === 1 ? FIELD.width : 0, y: this.ball.y };
     const keeperDistance = dist(keeper, savePoint);
-    const saveChance = clamp(
+    let saveChance = clamp(
       keeper.attributes.keeping / 88 +
         (3.8 - keeperDistance) * 0.12 -
         this.ball.quality * 0.28 +
@@ -1501,15 +1705,28 @@ export class MatchSimulation extends EventTarget {
       0.38,
       0.9,
     );
+    if (this.ball.restartKind === "penalty") {
+      saveChance = clamp(keeper.attributes.keeping / 170 + (2.8 - keeperDistance) * 0.05 - this.ball.quality * 0.18 + rand(-0.03, 0.08), 0.16, 0.52);
+    } else if (this.ball.restartKind === "freeKick") {
+      saveChance = clamp(saveChance - 0.08, 0.3, 0.82);
+    }
 
     if (chance(saveChance)) {
       keeper.x = clamp(savePoint.x - attackingTeam.direction * 2.3, 1, FIELD.width - 1);
       keeper.y = clamp(savePoint.y, GOAL_TOP - 3, GOAL_BOTTOM + 3);
       if (chance(0.68)) {
-        this.takePossession(keeper, `${defendingTeam.shortName} ${playerLabel(keeper)}扑救成功`);
+        const saveText =
+          this.ball.restartKind === "penalty"
+            ? `${defendingTeam.shortName} ${playerLabel(keeper)}扑出点球`
+            : `${defendingTeam.shortName} ${playerLabel(keeper)}扑救成功`;
+        this.takePossession(keeper, saveText);
       } else {
         this.ball.teamId = defendingTeam.id;
-        this.makeBallLoose(`${defendingTeam.shortName} ${playerLabel(keeper)}把球挡出`);
+        const blockText =
+          this.ball.restartKind === "penalty"
+            ? `${defendingTeam.shortName} ${playerLabel(keeper)}把点球挡出`
+            : `${defendingTeam.shortName} ${playerLabel(keeper)}把球挡出`;
+        this.makeBallLoose(blockText);
         this.ball.x = keeper.x + defendingTeam.direction * 4.5;
         this.ball.y = keeper.y + rand(-4, 4);
       }
@@ -1521,7 +1738,13 @@ export class MatchSimulation extends EventTarget {
     this.state = "goalPause";
     this.pauseTimer = MATCH.goalPauseSeconds;
     this.phaseText = "进球";
-    this.eventText = `${attackingTeam.shortName} ${playerLabel(this.ball.shotPlayer)}破门，比分 ${this.teams[0].score}:${this.teams[1].score}`;
+    const finishText =
+      this.ball.restartKind === "penalty"
+        ? "罚进点球"
+        : this.ball.restartKind === "freeKick"
+          ? "任意球破门"
+          : "破门";
+    this.eventText = `${attackingTeam.shortName} ${playerLabel(this.ball.shotPlayer)}${finishText}，比分 ${this.teams[0].score}:${this.teams[1].score}`;
     this.ball.mode = "loose";
     this.ball.owner = null;
     this.ball.vx = 0;
@@ -1616,6 +1839,8 @@ export class MatchSimulation extends EventTarget {
     this.ball.owner = null;
     this.ball.targetPlayer = null;
     this.ball.teamId = player.teamId;
+    this.ball.passKind = null;
+    this.ball.restartKind = null;
     this.ball.vx = direction.x * speed;
     this.ball.vy = direction.y * speed;
     this.ball.looseTimer = 0;
@@ -1631,6 +1856,8 @@ export class MatchSimulation extends EventTarget {
     this.ball.mode = "loose";
     this.ball.owner = null;
     this.ball.targetPlayer = null;
+    this.ball.passKind = null;
+    this.ball.restartKind = null;
     this.ball.vx *= 0.34;
     this.ball.vy *= 0.34;
     this.ball.looseTimer = 0;
@@ -1677,6 +1904,27 @@ export class MatchSimulation extends EventTarget {
     });
   }
 
+  scheduleForcedThrowIn(restartTeam, point, side, eventText) {
+    if (this.state === "restartPause" || !restartTeam) return false;
+    const restartPoint = {
+      x: clamp(point.x, 4, FIELD.width - 4),
+      y: side < 0 ? 0.8 : FIELD.height - 0.8,
+    };
+    const taker = this.nearestPlayer(restartPoint, restartTeam.players.filter((player) => player.role !== "GK"));
+    if (!taker) return false;
+    this.scheduleRestart({
+      type: "throwIn",
+      team: restartTeam,
+      taker,
+      point: restartPoint,
+      side,
+      pause: 0.75,
+      phaseText: "边线球",
+      eventText,
+    });
+    return true;
+  }
+
   scheduleGoalLineRestart() {
     if (this.state === "restartPause") return;
     const exitSide = this.ball.x >= FIELD.width ? 1 : -1;
@@ -1707,7 +1955,32 @@ export class MatchSimulation extends EventTarget {
     });
   }
 
-  scheduleRestart({ type, team, taker, point, pause, phaseText, eventText, exitSide = 0, side = 0 }) {
+  scheduleForcedCorner(restartTeam, point, eventText) {
+    if (this.state === "restartPause" || !restartTeam) return false;
+    const exitSide = restartTeam.direction;
+    const restartPoint = {
+      x: exitSide === 1 ? FIELD.width - 0.8 : 0.8,
+      y: point.y < CENTER_Y ? 0.8 : FIELD.height - 0.8,
+    };
+    const taker = this.nearestPlayer(restartPoint, restartTeam.players.filter((player) => player.role !== "GK")) ?? restartTeam.players[0];
+    if (!taker) return false;
+    this.scheduleRestart({
+      type: "corner",
+      team: restartTeam,
+      taker,
+      point: restartPoint,
+      exitSide,
+      pause: 1.15,
+      phaseText: "角球",
+      eventText,
+    });
+    return true;
+  }
+
+  scheduleRestart({ type, team, taker, point, pause, phaseText, eventText, exitSide = 0, side = 0, direct = false, foulPoint = null }) {
+    if (type === "corner") this.restartStats.corners += 1;
+    else if (type === "throwIn") this.restartStats.throwIns += 1;
+    else if (type === "goalKick") this.restartStats.goalKicks += 1;
     this.state = "restartPause";
     this.pauseTimer = pause;
     this.restartContext = {
@@ -1717,14 +1990,18 @@ export class MatchSimulation extends EventTarget {
       point,
       exitSide,
       side,
+      direct,
+      foulPoint,
     };
     this.ball.mode = "loose";
     this.ball.owner = null;
     this.ball.targetPlayer = null;
     this.ball.shotPlayer = null;
+    this.ball.passKind = null;
     this.ball.vx = 0;
     this.ball.vy = 0;
     this.ball.speed = 0;
+    this.ball.restartKind = null;
     this.ball.looseTimer = 0;
     this.ball.stallTimer = 0;
     this.ball.teamId = team.id;
@@ -1767,6 +2044,25 @@ export class MatchSimulation extends EventTarget {
       this.executeThrowIn(taker, team, context);
       return;
     }
+    if (context.type === "penalty") {
+      this.executePenaltyKick(taker, team);
+      return;
+    }
+    this.executeFreeKick(taker, team, context);
+  }
+
+  executeFreeKick(taker, team, context) {
+    if (context.direct && this.shouldShootFreeKick(taker, team)) {
+      this.shoot(taker, team, 0.08, {
+        directFreeKick: true,
+        restartKind: "freeKick",
+        accuracyBonus: 0.045,
+        qualityBonus: 0.04,
+        speedBonus: 1.4,
+        eventText: `${team.shortName} ${playerLabel(taker)}直接任意球攻门`,
+      });
+      return;
+    }
 
     const target = this.chooseRestartPassTarget(taker, team, context);
     if (target) {
@@ -1782,6 +2078,27 @@ export class MatchSimulation extends EventTarget {
       return;
     }
     this.goalkeeperLongKick(taker, team, `${team.shortName} ${playerLabel(taker)}开出任意球`);
+  }
+
+  shouldShootFreeKick(taker, team) {
+    const goalX = team.direction === 1 ? FIELD.width : 0;
+    const distanceToGoal = Math.abs(goalX - taker.x);
+    const centrality = 1 - clamp(Math.abs(taker.y - CENTER_Y) / 27, 0, 1);
+    if (distanceToGoal > 31 || centrality < 0.34) return false;
+    const shootingWeight = clamp((taker.attributes.shooting - 48) / 42, 0, 1);
+    const rangeWeight = clamp((31 - distanceToGoal) / 17, 0, 1);
+    return chance(0.14 + centrality * 0.22 + shootingWeight * 0.18 + rangeWeight * 0.16);
+  }
+
+  executePenaltyKick(taker, team) {
+    this.shoot(taker, team, 0, {
+      penalty: true,
+      restartKind: "penalty",
+      accuracyBonus: 0.22,
+      qualityBonus: 0.16,
+      speedBonus: 0.8,
+      eventText: `${team.shortName} ${playerLabel(taker)}主罚点球`,
+    });
   }
 
   executeGoalKick(taker, team) {
@@ -1932,6 +2249,133 @@ export class MatchSimulation extends EventTarget {
     return candidates[0] ?? null;
   }
 
+  tryCommitFoul(defender, carrier, distance, tackleStrength, dt) {
+    if (!FOULS.enabled || this.state !== "playing" || this.fouls?.cooldown > 0) return false;
+    if (!defender || !carrier || defender.teamId === carrier.teamId) return false;
+    const attackingTeam = this.getTeam(carrier.teamId);
+    const defendingTeam = this.getTeam(defender.teamId);
+    if (!attackingTeam || !defendingTeam) return false;
+    const goalX = attackingTeam.direction === 1 ? FIELD.width : 0;
+    const attackingDanger = clamp(1 - Math.abs(goalX - carrier.x) / FIELD.width, 0, 1);
+    const lateChallenge = clamp(1 - tackleStrength, 0, 1);
+    const closeContact = clamp((2.65 - distance) / 2.2, 0, 1);
+    const foulPoint = {
+      x: clamp(lerp(defender.x, carrier.x, 0.55), 2, FIELD.width - 2),
+      y: clamp(lerp(defender.y, carrier.y, 0.55), 2, FIELD.height - 2),
+    };
+    const penaltyAreaCaution = this.isPenaltyFoul(foulPoint, defendingTeam, attackingTeam) ? FOULS.penaltyAreaChanceMultiplier : 1;
+    const foulChance = clamp(
+      FOULS.baseChance * closeContact * (0.65 + lateChallenge * 1.1 + attackingDanger * 0.8) * penaltyAreaCaution * dt * 8,
+      0,
+      FOULS.maxChancePerChallenge,
+    );
+    if (!chance(foulChance)) return false;
+    if (this.fouls) {
+      this.fouls.cooldown = Math.max(3.5, FOULS.cooldownSeconds + rand(-2, 3));
+      this.fouls.count += 1;
+    }
+    this.callFoul(defender, carrier, { attackingDanger, lateChallenge, contactDistance: distance });
+    return true;
+  }
+
+  callFoul(offender, fouledPlayer, context = {}) {
+    const offenderTeam = this.getTeam(offender.teamId);
+    const restartTeam = this.getTeam(fouledPlayer.teamId);
+    if (!offenderTeam || !restartTeam) return;
+
+    const foulPoint = {
+      x: clamp(lerp(offender.x, fouledPlayer.x, 0.55), 2, FIELD.width - 2),
+      y: clamp(lerp(offender.y, fouledPlayer.y, 0.55), 2, FIELD.height - 2),
+    };
+    const isPenalty = this.isPenaltyFoul(foulPoint, offenderTeam, restartTeam);
+    if (isPenalty && this.fouls) this.fouls.penalties += 1;
+    const denyingChance = context.attackingDanger > 0.76 && this.isCentralShootingLane(foulPoint);
+    const redChance = clamp(
+      FOULS.redCardChance + context.lateChallenge * 0.008 + (denyingChance ? 0.018 : 0) + (isPenalty ? 0.006 : 0),
+      0,
+      0.05,
+    );
+    const yellowChance = clamp(
+      FOULS.yellowCardChance + context.lateChallenge * 0.08 + context.attackingDanger * 0.08 + (isPenalty ? 0.04 : 0),
+      0.08,
+      0.42,
+    );
+    let cardResult = { type: "none", text: "" };
+    if (chance(redChance)) cardResult = this.issueCard(offender, "red");
+    else if (chance(yellowChance)) cardResult = this.issueCard(offender, "yellow");
+
+    this.referee.whistleTimer = Math.max(this.referee.whistleTimer, 1.25);
+    this.referee.x = lerp(this.referee.x, foulPoint.x, 0.35);
+    this.referee.y = lerp(this.referee.y, foulPoint.y, 0.35);
+
+    if (isPenalty) {
+      this.schedulePenaltyRestart(restartTeam, offenderTeam, offender, fouledPlayer, foulPoint, cardResult);
+      return;
+    }
+
+    this.scheduleFreeKickRestart(restartTeam, offenderTeam, offender, fouledPlayer, foulPoint, cardResult);
+  }
+
+  isPenaltyFoul(point, defendingTeam, attackingTeam) {
+    if (defendingTeam.id === attackingTeam.id) return false;
+    const inY = point.y >= CENTER_Y - FIELD.penaltyWidth / 2 && point.y <= CENTER_Y + FIELD.penaltyWidth / 2;
+    if (!inY) return false;
+    return defendingTeam.direction === 1 ? point.x <= FIELD.penaltyDepth : point.x >= FIELD.width - FIELD.penaltyDepth;
+  }
+
+  isCentralShootingLane(point) {
+    return Math.abs(point.y - CENTER_Y) < FIELD.goalWidth * 1.35;
+  }
+
+  scheduleFreeKickRestart(restartTeam, offenderTeam, offender, fouledPlayer, point, cardResult) {
+    const taker =
+      this.nearestPlayer(point, restartTeam.players.filter((player) => player.role !== "GK")) ??
+      restartTeam.players.find((player) => player.role === "GK") ??
+      restartTeam.players[0];
+    if (!taker) return;
+    const cardText = cardResult?.text ? `，${cardResult.text}` : "";
+    const eventText = `${offenderTeam.shortName} ${playerLabel(offender)}犯规，${restartTeam.shortName} 获得任意球${cardText}`;
+    this.scheduleRestart({
+      type: "freeKick",
+      team: restartTeam,
+      taker,
+      point,
+      pause: 1.05,
+      phaseText: "任意球",
+      eventText,
+      direct: true,
+    });
+    if (!cardResult?.text) this.showMatchNotice("freeKick", "任意球", `${restartTeam.shortName} ${playerLabel(fouledPlayer)}`, restartTeam.id, 2.3);
+  }
+
+  schedulePenaltyRestart(restartTeam, offenderTeam, offender, fouledPlayer, foulPoint, cardResult) {
+    const point = {
+      x: restartTeam.direction === 1 ? FIELD.width - 11 : 11,
+      y: CENTER_Y,
+    };
+    const taker = this.pickPenaltyTaker(restartTeam) ?? restartTeam.players[0];
+    if (!taker) return;
+    const cardText = cardResult?.text ? `，${cardResult.text}` : "";
+    this.scheduleRestart({
+      type: "penalty",
+      team: restartTeam,
+      taker,
+      point,
+      pause: 1.65,
+      phaseText: "点球",
+      eventText: `${offenderTeam.shortName} ${playerLabel(offender)}禁区内犯规，${restartTeam.shortName} 获得点球${cardText}`,
+      foulPoint,
+    });
+    if (!cardResult?.text) this.showMatchNotice("penalty", "点球", `${restartTeam.shortName} ${playerLabel(fouledPlayer)}`, restartTeam.id, 2.7);
+  }
+
+  pickPenaltyTaker(team) {
+    return team.players
+      .filter((player) => player.role !== "GK")
+      .slice()
+      .sort((a, b) => b.attributes.shooting + b.attributes.dribbling * 0.18 - (a.attributes.shooting + a.attributes.dribbling * 0.18))[0];
+  }
+
   sweepRestartBall(taker, team, eventText, exitSide) {
     const goalX = exitSide === 1 ? FIELD.width : exitSide === -1 ? 0 : taker.x + team.direction * 34;
     const target = {
@@ -1944,6 +2388,8 @@ export class MatchSimulation extends EventTarget {
     this.ball.owner = null;
     this.ball.targetPlayer = null;
     this.ball.teamId = team.id;
+    this.ball.passKind = null;
+    this.ball.restartKind = null;
     this.ball.vx = direction.x * speed;
     this.ball.vy = direction.y * speed;
     this.ball.speed = speed;
@@ -1968,6 +2414,8 @@ export class MatchSimulation extends EventTarget {
     const d = dist(carrier, nearest);
     if (d < 2.6) {
       const tackleStrength = nearest.attributes.defense / (nearest.attributes.defense + carrier.attributes.dribbling);
+      if (this.tryTouchlineChallengeForThrowIn(carrier, nearest, dt)) return;
+      if (this.tryCommitFoul(nearest, carrier, d, tackleStrength, dt)) return;
       const tackleChance = clamp((2.8 - d) * tackleStrength * dt * 0.62, 0, 0.42);
       nearest.tackleTimer = rand(0.18, 0.62);
       if (chance(tackleChance)) {
@@ -1981,6 +2429,82 @@ export class MatchSimulation extends EventTarget {
         this.emitUpdate();
       }
     }
+  }
+
+  checkRestartRhythmEvents(dt) {
+    if (this.state !== "playing" || this.ball.mode !== "owned" || !this.ball.owner) return;
+    const carrier = this.ball.owner;
+    const team = this.getTeam(carrier.teamId);
+    if (!team) return;
+    const opponents = this.getOpponents(team.id);
+    const nearest = this.nearestPlayer(carrier, opponents.filter((player) => player.role !== "GK"));
+
+    if (this.restartStats.throwIns === 0 && this.clock > this.matchSeconds * RESTART_EVENTS.throwInCatchupAfter) {
+      const forceThrow = this.clock > this.matchSeconds * 0.58;
+      if (this.tryTouchlineChallengeForThrowIn(carrier, nearest, dt, { force: forceThrow })) return;
+    }
+
+    if (this.restartStats.corners === 0 && this.clock > this.matchSeconds * RESTART_EVENTS.cornerCatchupAfter) {
+      const attackingProgress = team.direction * (carrier.x - FIELD.width / 2);
+      const wideFactor = Math.abs(carrier.y - CENTER_Y) / CENTER_Y;
+      const lateCatchup = this.clock > this.matchSeconds * 0.72;
+      if (attackingProgress < 8 && !lateCatchup) return;
+      const cornerChance = clamp(
+        dt * (lateCatchup ? 0.9 : 0.26) * (0.65 + team.tactic.shape.width * 1.8) * (0.55 + wideFactor),
+        0,
+        0.55,
+      );
+      if (!chance(cornerChance)) return;
+      const defendingTeam = this.teams.find((currentTeam) => currentTeam.id !== team.id);
+      const defender = nearest ?? defendingTeam?.players.find((player) => player.role !== "GK");
+      const blockText = defender
+        ? `${defendingTeam.shortName} ${playerLabel(defender)}挡出传中，${team.shortName} 获得角球`
+        : `${team.shortName} 边路传中被挡出，获得角球`;
+      this.referee.whistleTimer = 0.75;
+      this.scheduleForcedCorner(team, carrier, blockText);
+      return;
+    }
+
+    if (team.tactic.id === "wingCross" && this.restartStats.corners < 4 && this.clock > this.matchSeconds * 0.2) {
+      const attackingProgress = team.direction * (carrier.x - FIELD.width / 2);
+      const wideFactor = Math.abs(carrier.y - CENTER_Y) / CENTER_Y;
+      if (attackingProgress < 16 || wideFactor < 0.42) return;
+      const extraCornerChance = clamp(dt * 0.18 * wideFactor * (0.85 + team.tactic.shape.width), 0, 0.28);
+      if (!chance(extraCornerChance)) return;
+      const defendingTeam = this.teams.find((currentTeam) => currentTeam.id !== team.id);
+      const defender = nearest ?? defendingTeam?.players.find((player) => player.role !== "GK");
+      this.referee.whistleTimer = 0.75;
+      this.scheduleForcedCorner(
+        team,
+        carrier,
+        defender
+          ? `${defendingTeam.shortName} ${playerLabel(defender)}封堵下底传中，${team.shortName} 获得角球`
+          : `${team.shortName} 下底传中被挡出，获得角球`,
+      );
+    }
+  }
+
+  tryTouchlineChallengeForThrowIn(carrier, defender, dt, options = {}) {
+    const team = this.getTeam(carrier.teamId);
+    const defendingTeam = defender ? this.getTeam(defender.teamId) : this.teams.find((currentTeam) => currentTeam.id !== team?.id);
+    if (!team || !defendingTeam || defendingTeam.id === team.id) return false;
+    const sideDistance = Math.min(carrier.y, FIELD.height - carrier.y);
+    const nearTouchline = sideDistance < 14;
+    if (!nearTouchline && !options.force) return false;
+    const catchupBoost = this.restartStats.throwIns === 0 && this.clock > this.matchSeconds * RESTART_EVENTS.throwInCatchupAfter ? 1.8 : 1;
+    const widthFactor = 0.55 + team.tactic.shape.width * 1.55;
+    const forceFactor = options.force ? 3.2 : 1;
+    const throwChance = clamp(dt * RESTART_EVENTS.touchlineChallengeChance * widthFactor * catchupBoost * forceFactor, 0, 0.42);
+    if (!chance(throwChance)) return false;
+
+    const side = carrier.y < CENTER_Y ? -1 : 1;
+    const defenderLastTouch = defender && chance(options.force ? 0.72 : 0.64);
+    const restartTeam = defenderLastTouch ? team : defendingTeam;
+    const eventText = defenderLastTouch
+      ? `${defendingTeam.shortName} ${playerLabel(defender)}封堵出边线，${restartTeam.shortName} 获得边线球`
+      : `${team.shortName} ${playerLabel(carrier)}贴边趟大，${restartTeam.shortName} 获得边线球`;
+    this.referee.whistleTimer = 0.65;
+    return this.scheduleForcedThrowIn(restartTeam, carrier, side, eventText);
   }
 
   setRestingTargets() {
@@ -2046,6 +2570,20 @@ export class MatchSimulation extends EventTarget {
           const pressLine = ownGoalX + restartTeam.direction * 46;
           player.targetX = clamp(pressLine + restartTeam.direction * ((player.order % 4) * 3.2), 4, FIELD.width - 4);
           player.targetY = clamp(player.anchor.y, 5, FIELD.height - 5);
+        }
+      } else if (context.type === "penalty") {
+        const hasRestart = player.teamId === restartTeam.id;
+        const goalX = restartTeam.direction === 1 ? FIELD.width : 0;
+        const defendingGoalkeeper = !hasRestart && player.role === "GK";
+        if (defendingGoalkeeper) {
+          player.targetX = clamp(goalX - restartTeam.direction * 1.1, 1.5, FIELD.width - 1.5);
+          player.targetY = CENTER_Y;
+        } else if (hasRestart) {
+          player.targetX = clamp(context.point.x - restartTeam.direction * (9 + (player.order % 5) * 1.8), 4, FIELD.width - 4);
+          player.targetY = clamp(CENTER_Y + ((player.order % 2 === 0 ? -1 : 1) * (8 + (player.order % 4) * 4)), 6, FIELD.height - 6);
+        } else {
+          player.targetX = clamp(context.point.x - restartTeam.direction * (11 + (player.order % 5) * 1.7), 4, FIELD.width - 4);
+          player.targetY = clamp(CENTER_Y + ((player.order % 2 === 0 ? 1 : -1) * (9 + (player.order % 4) * 3.5)), 6, FIELD.height - 6);
         }
       } else {
         const hasRestart = player.teamId === restartTeam.id;

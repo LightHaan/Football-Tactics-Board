@@ -23,6 +23,28 @@ export const PLAYER_RENDERING = {
 export const DISCIPLINE = {
   yellowCardsPerMatch: 1,
   redCardsPerMatch: 0,
+  yellowCardsBeforeRed: 2,
+};
+
+export const FOULS = {
+  enabled: true,
+  baseChance: 0.012,
+  maxChancePerChallenge: 0.016,
+  cooldownSeconds: 8,
+  penaltyAreaChanceMultiplier: 0.04,
+  yellowCardChance: 0.14,
+  redCardChance: 0.004,
+};
+
+export const RESTART_EVENTS = {
+  touchlineChallengeChance: 0.18,
+  blockedCrossCornerChance: 0.36,
+  throwInCatchupAfter: 0.28,
+  cornerCatchupAfter: 0.44,
+};
+
+export const SUBSTITUTIONS = {
+  maxPerTeam: 5,
 };
 
 export const OFFSIDE = {

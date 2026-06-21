@@ -125,9 +125,19 @@ function classifyEvent(text) {
   if (text.includes("破门") || text.includes("进球，比分")) return "goal";
   if (text.includes("黄牌") || text.includes("红牌") || text.includes("换人")) return "whistle";
   if (text.includes("越位")) return "whistle";
-  if (text.includes("全场结束") || text.includes("获得角球") || text.includes("获得门球") || text.includes("获得边线球")) return "whistle";
+  if (
+    text.includes("全场结束") ||
+    text.includes("获得角球") ||
+    text.includes("获得门球") ||
+    text.includes("获得边线球") ||
+    text.includes("获得任意球") ||
+    text.includes("获得点球") ||
+    text.includes("犯规")
+  ) {
+    return "whistle";
+  }
   if (text.includes("开球")) return "whistle";
-  if (text.includes("起脚射门") || text.includes("远射")) return "shot";
+  if (text.includes("起脚射门") || text.includes("远射") || text.includes("主罚点球") || text.includes("任意球攻门")) return "shot";
   if (text.includes("扑救") || text.includes("挡出")) return "save";
   if (
     text.includes("抢断") ||

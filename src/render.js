@@ -1,4 +1,4 @@
-import { FIELD, PLAYER_RENDERING } from "./data.js?v=21";
+import { FIELD, PLAYER_RENDERING } from "./data.js?v=29";
 
 const GOAL_TOP = FIELD.height / 2 - FIELD.goalWidth / 2;
 const GOAL_BOTTOM = FIELD.height / 2 + FIELD.goalWidth / 2;
@@ -407,8 +407,9 @@ export class FootballRenderer {
     if (referee.cardFlashTimer > 0) {
       const cardX = rightHand.x + radius * 0.4;
       const cardY = rightHand.y - radius * 1.45;
-      ctx.fillStyle = "#ffd532";
-      ctx.strokeStyle = "#2b2100";
+      const cardColor = referee.cardColor ?? "#ffd532";
+      ctx.fillStyle = cardColor;
+      ctx.strokeStyle = cardColor === "#e93636" ? "#3a0505" : "#2b2100";
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.rect(cardX, cardY, radius * 0.72, radius * 1.05);
