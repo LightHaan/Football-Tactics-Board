@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>足球战术板</title>
+    <link rel="stylesheet" href="./styles.css?v=21" />
+  </head>
+  <body>
+    <main class="match-shell" aria-label="足球战术板">
+      <section class="score-strip" aria-live="polite">
+        <div class="team team-home">
+          <span id="homeCrest" class="crest">NC</span>
+          <span class="team-info">
+            <span id="homeName" class="team-name">North City</span>
+            <span class="card-counts" aria-label="主队红黄牌">
+              <span class="card-marker yellow-card" aria-hidden="true"></span>
+              <span id="homeYellowCards">0</span>
+              <span class="card-marker red-card" aria-hidden="true"></span>
+              <span id="homeRedCards">0</span>
+            </span>
+          </span>
+        </div>
+        <div class="score-core">
+          <span id="homeScore" class="score">0</span>
+          <span class="score-divider">:</span>
+          <span id="awayScore" class="score">0</span>
+          <span id="matchClock" class="clock">10:00</span>
+          <span id="matchTotal" class="match-total">本场总时长 10 分钟</span>
+        </div>
+        <div class="team team-away">
+          <span class="team-info team-info-away">
+            <span id="awayName" class="team-name">Harbor United</span>
+            <span class="card-counts" aria-label="客队红黄牌">
+              <span class="card-marker yellow-card" aria-hidden="true"></span>
+              <span id="awayYellowCards">0</span>
+              <span class="card-marker red-card" aria-hidden="true"></span>
+              <span id="awayRedCards">0</span>
+            </span>
+          </span>
+          <span id="awayCrest" class="crest">HU</span>
+        </div>
+      </section>
+
+      <button id="settingsToggle" class="settings-toggle" type="button" aria-expanded="false" aria-controls="setupPanel">设置</button>
+
+      <section id="setupPanel" class="setup-panel is-hidden" aria-label="比赛设置">
+        <label class="setup-field">
+          <span>主队</span>
+          <select id="homeTeamSelect"></select>
+        </label>
+        <label class="setup-field">
+          <span>客队</span>
+          <select id="awayTeamSelect"></select>
+        </label>
+        <label class="setup-field">
+          <span>主队阵型</span>
+          <select id="homeFormationSelect"></select>
+        </label>
+        <label class="setup-field">
+          <span>客队阵型</span>
+          <select id="awayFormationSelect"></select>
+        </label>
+        <label class="setup-field">
+          <span>主队战术</span>
+          <select id="homeTacticSelect"></select>
+        </label>
+        <label class="setup-field">
+          <span>客队战术</span>
+          <select id="awayTacticSelect"></select>
+        </label>
+        <label class="setup-field setup-time">
+          <span>时间</span>
+          <select id="matchLengthSelect">
+            <option value="60">1 分钟</option>
+            <option value="180">3 分钟</option>
+            <option value="300">5 分钟</option>
+            <option value="600" selected>10 分钟</option>
+            <option value="900">15 分钟</option>
+          </select>
+        </label>
+        <label class="setup-field sound-field">
+          <span>音效</span>
+          <input id="soundToggle" type="checkbox" checked />
+        </label>
+        <div class="lineup-panel" aria-label="首发设置">
+          <section class="lineup-group">
+            <h2>主队首发</h2>
+            <div id="homeLineupEditor" class="lineup-editor"></div>
+          </section>
+          <section class="lineup-group">
+            <h2>客队首发</h2>
+            <div id="awayLineupEditor" class="lineup-editor"></div>
+          </section>
+        </div>
+        <button id="startMatchButton" class="start-button" type="button">开始</button>
+      </section>
+
+      <canvas id="pitchCanvas" aria-label="比赛动画画布"></canvas>
+
+      <div id="matchNotice" class="match-notice is-hidden" aria-live="assertive">
+        <span id="noticeTitle" class="notice-title">越位</span>
+        <span id="noticeMessage" class="notice-message"></span>
+      </div>
+
+      <aside class="match-panel" aria-live="polite">
+        <div class="panel-row">
+          <span>第 <strong id="roundNumber">1</strong> 局</span>
+          <span id="phaseText">开球</span>
+        </div>
+        <div id="eventText" class="event-text">比赛准备开始</div>
+        <div id="lastResult" class="last-result">上一局：暂无</div>
+      </aside>
+    </main>
+
+    <script type="module" src="./src/app.js?v=21"></script>
+  </body>
+</html>
