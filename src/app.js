@@ -1,6 +1,6 @@
-import { MatchSimulation } from "./simulation.js?v=30";
-import { FootballRenderer } from "./render.js?v=30";
-import { MatchAudio } from "./audio.js?v=30";
+import { MatchSimulation } from "./simulation.js?v=31";
+import { FootballRenderer } from "./render.js?v=31";
+import { MatchAudio } from "./audio.js?v=31";
 import {
   COUNTRY_DATABASE,
   COUNTRY_OPTIONS,
@@ -10,7 +10,7 @@ import {
   MATCH_TEAM_CODES,
   SUBSTITUTIONS,
   TACTIC_OPTIONS,
-} from "./data.js?v=30";
+} from "./data.js?v=31";
 
 const canvas = document.querySelector("#pitchCanvas");
 const renderer = new FootballRenderer(canvas);
@@ -52,6 +52,8 @@ const ui = {
   awayTacticSelect: document.querySelector("#awayTacticSelect"),
   homeLineupEditor: document.querySelector("#homeLineupEditor"),
   awayLineupEditor: document.querySelector("#awayLineupEditor"),
+  tacticApplyButton: document.querySelector("#tacticApplyButton"),
+  tacticStatus: document.querySelector("#tacticStatus"),
   matchLengthSelect: document.querySelector("#matchLengthSelect"),
   soundToggle: document.querySelector("#soundToggle"),
   autoSubstitutionToggle: document.querySelector("#autoSubstitutionToggle"),
@@ -110,6 +112,7 @@ ui.homeTeamSelect.addEventListener("change", () => handleTeamChanged("home"));
 ui.awayTeamSelect.addEventListener("change", () => handleTeamChanged("away"));
 ui.homeFormationSelect.addEventListener("change", () => renderLineupEditor("home"));
 ui.awayFormationSelect.addEventListener("change", () => renderLineupEditor("away"));
+ui.tacticApplyButton.addEventListener("click", handleApplyTactics);
 ui.soundToggle.addEventListener("change", handleSoundToggle);
 ui.startMatchButton.addEventListener("click", startConfiguredMatch);
 ui.substitutionTeamSelect.addEventListener("change", handleSubstitutionTeamChanged);
@@ -149,6 +152,7 @@ function updateUi(snapshot) {
   ui.event.textContent = snapshot.eventText;
   ui.lastResult.textContent = snapshot.lastResult ? `上一局：${snapshot.lastResult}` : "上一局：暂无";
   updateMatchNotice(snapshot.notice);
+  updateTacticApplyButtonState(snapshot);
   updateSubstitutionControls(snapshot);
   playEventSound(snapshot.eventText);
 }
@@ -380,6 +384,29 @@ function updateSubstitutionButtonState(snapshot) {
   ui.substitutionButton.disabled = !canUse;
 }
 
+function updateTacticApplyButtonState(snapshot) {
+  ui.tacticApplyButton.disabled = snapshot.state === "fullTime";
+}
+
+function handleApplyTactics() {
+  audio.unlock();
+  const results = [
+    applySideTactics("home", ui.homeFormationSelect.value, ui.homeTacticSelect.value),
+    applySideTactics("away", ui.awayFormationSelect.value, ui.awayTacticSelect.value),
+  ];
+  const ok = results.every((result) => result.ok);
+  setTacticStatus(results.map((result) => result.message).join("；"), ok);
+  if (ok) substitutionControls.signature = "";
+  updateUi(simulation.getSnapshot());
+}
+
+function applySideTactics(teamId, formation, tactic) {
+  return simulation.applyTeamTactics(teamId, {
+    formation,
+    tactic: tactic === "auto" ? null : tactic,
+  });
+}
+
 function handleSubstitutionTeamChanged() {
   substitutionControls.selectedTeamId = ui.substitutionTeamSelect.value;
   substitutionControls.selectedOutId = "";
@@ -417,6 +444,12 @@ function setSubstitutionStatus(message, isSuccess) {
   ui.substitutionStatus.classList.toggle("is-error", Boolean(message && !isSuccess));
 }
 
+function setTacticStatus(message, isSuccess) {
+  ui.tacticStatus.textContent = message ?? "";
+  ui.tacticStatus.classList.toggle("is-success", Boolean(isSuccess));
+  ui.tacticStatus.classList.toggle("is-error", Boolean(message && !isSuccess));
+}
+
 function collectLineupIds(side) {
   return lineupSelects[side].map((select) => select.value).filter(Boolean);
 }
@@ -449,6 +482,7 @@ function startConfiguredMatch() {
       },
     },
   });
+  setTacticStatus("", false);
   setSubstitutionStatus("", false);
   substitutionControls.selectedOutId = "";
   substitutionControls.selectedInId = "";

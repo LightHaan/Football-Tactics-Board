@@ -1,4 +1,16 @@
-import { DISCIPLINE, FIELD, FOULS, MATCH, MATCH_TEAM_CODES, OFFSIDE, RESTART_EVENTS, SUBSTITUTIONS, buildTeams } from "./data.js?v=30";
+import {
+  DISCIPLINE,
+  FIELD,
+  FORMATIONS,
+  FOULS,
+  MATCH,
+  MATCH_TEAM_CODES,
+  OFFSIDE,
+  RESTART_EVENTS,
+  SUBSTITUTIONS,
+  TACTICS,
+  buildTeams,
+} from "./data.js?v=31";
 
 const CENTER_Y = FIELD.height / 2;
 const GOAL_TOP = CENTER_Y - FIELD.goalWidth / 2;
@@ -465,6 +477,81 @@ export class MatchSimulation extends EventTarget {
     this.showMatchNotice("substitution", "换人", `${team.shortName} ${playerLabel(replacement)}上，${playerLabel(outgoing)}下`, team.id, 3);
     this.emitUpdate();
     return { ok: true, message: `${team.shortName} ${replacement.name} 上场` };
+  }
+
+  applyTeamTactics(teamId, options = {}) {
+    const team = this.getTeam(teamId);
+    if (!team) return { ok: false, message: "没有找到球队" };
+    if (this.state === "fullTime") return { ok: false, message: "全场结束后不能调整战术" };
+
+    const formation = options.formation ?? team.formation;
+    const slots = FORMATIONS[formation];
+    if (!slots) return { ok: false, message: `${team.shortName} 阵型不可用` };
+
+    const tactic = this.resolveLiveTactic(team, options.tactic);
+    if (!tactic) return { ok: false, message: `${team.shortName} 战术不可用` };
+
+    team.formation = formation;
+    team.tactic = tactic;
+    this.matchConfig = {
+      ...this.matchConfig,
+      [team.id]: {
+        ...(this.matchConfig?.[team.id] ?? {}),
+        formation,
+        tactic: options.tactic && TACTICS[options.tactic] ? options.tactic : null,
+      },
+    };
+
+    this.applyFormationSlots(team, slots);
+    this.players = this.teams.flatMap((currentTeam) => currentTeam.players);
+
+    if (this.state === "restartPause") this.setRestartTargets();
+    else if (this.state === "goalPause") this.setRestingTargets();
+
+    this.phaseText = "战术调整";
+    this.eventText = `${team.shortName} 调整为 ${formation}，主打${team.tactic.name}`;
+    if (this.referee) this.referee.whistleTimer = 0.45;
+    this.showMatchNotice("substitution", "战术调整", `${team.shortName} ${formation} / ${team.tactic.name}`, team.id, 2.4);
+    this.emitUpdate();
+    return { ok: true, message: `${team.shortName} ${formation}/${team.tactic.name}` };
+  }
+
+  resolveLiveTactic(team, tacticId) {
+    if (tacticId && TACTICS[tacticId]) return TACTICS[tacticId];
+    if (tacticId && !TACTICS[tacticId]) return null;
+    const tacticPool = (team.tacticPool ?? []).filter((id) => TACTICS[id]);
+    const fallbackPool = tacticPool.length ? tacticPool : ["balanced"];
+    return TACTICS[fallbackPool[Math.floor(Math.random() * fallbackPool.length)]] ?? TACTICS.balanced;
+  }
+
+  applyFormationSlots(team, slots) {
+    const activePlayers = team.players ?? [];
+    if (!activePlayers.length) return;
+
+    const goalkeeperSlot = slots.find((slot) => slot.role === "GK") ?? slots[0];
+    const outfieldSlots = slots.filter((slot) => slot !== goalkeeperSlot);
+    const goalkeeper =
+      activePlayers.find((player) => player.role === "GK") ??
+      activePlayers.find((player) => player.nativeRole === "GK") ??
+      activePlayers[0];
+    const outfieldPlayers = activePlayers.filter((player) => player !== goalkeeper);
+    const orderedPlayers = [goalkeeper, ...outfieldPlayers];
+    const orderedSlots = [goalkeeperSlot, ...outfieldSlots];
+
+    orderedPlayers.forEach((player, index) => {
+      const slot = orderedSlots[index] ?? orderedSlots[orderedSlots.length - 1];
+      const anchor = mirrorFormationAnchor(slot.anchor, team.direction);
+      player.position = slot.position;
+      player.role = slot.role;
+      player.anchor = anchor;
+      player.targetX = anchor.x;
+      player.targetY = anchor.y;
+      player.order = index;
+      player.decisionTimer = Math.min(player.decisionTimer ?? 0, rand(0.12, 0.38));
+      if (player.role === "GK") this.constrainGoalkeeper(player);
+    });
+
+    team.players = orderedPlayers;
   }
 
   isPlayerInActiveBallAction(player) {
@@ -2663,6 +2750,14 @@ function normalize(x, y) {
   const length = Math.hypot(x, y);
   if (length === 0) return { x: 0, y: 0 };
   return { x: x / length, y: y / length };
+}
+
+function mirrorFormationAnchor(anchor, direction) {
+  if (direction === 1) return { ...anchor };
+  return {
+    x: FIELD.width - anchor.x,
+    y: FIELD.height - anchor.y,
+  };
 }
 
 function distanceToSegment(point, a, b) {

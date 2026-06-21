@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>足球战术板</title>
-    <link rel="stylesheet" href="./styles.css?v=30" />
+    <link rel="stylesheet" href="./styles.css?v=31" />
   </head>
   <body>
     <main class="match-shell" aria-label="足球战术板">
@@ -94,6 +94,10 @@
           <span>客队战术</span>
           <select id="awayTacticSelect"></select>
         </label>
+        <div class="tactic-actions">
+          <button id="tacticApplyButton" class="substitution-button tactic-apply-button" type="button">应用战术</button>
+          <span id="tacticStatus" class="substitution-status tactic-status" aria-live="polite"></span>
+        </div>
         <div class="lineup-panel" aria-label="首发设置">
           <section class="lineup-group">
             <h2>主队首发</h2>
@@ -139,6 +143,6 @@
       </aside>
     </main>
 
-    <script type="module" src="./src/app.js?v=30"></script>
+    <script type="module" src="./src/app.js?v=31"></script>
   </body>
 </html>
