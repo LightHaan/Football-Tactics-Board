@@ -1,4 +1,4 @@
-import { FIELD, PLAYER_RENDERING } from "./data.js?v=38";
+import { FIELD, PLAYER_RENDERING } from "./data.js?v=39";
 
 const GOAL_TOP = FIELD.height / 2 - FIELD.goalWidth / 2;
 const GOAL_BOTTOM = FIELD.height / 2 + FIELD.goalWidth / 2;
@@ -671,12 +671,6 @@ export class FootballRenderer {
     ctx.fill();
     ctx.stroke();
 
-    ctx.strokeStyle = "rgba(255,255,255,0.34)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(leadFoot.x - facing.x * headRadius * 1.1, leadFoot.y + headRadius * 0.9);
-    ctx.lineTo(leadFoot.x - facing.x * headRadius * 2.4, leadFoot.y + headRadius * 0.7);
-    ctx.stroke();
     ctx.restore();
   }
 
@@ -746,7 +740,6 @@ export class FootballRenderer {
         y: groundY - headRadius * 0.18,
       };
       this.drawStickLimb(ctx, hip, knee, foot);
-      this.drawActionStreak(ctx, foot, kick, headRadius);
     } else if (pose.type === "throwIn") {
       const leftElbow = {
         x: shoulder.x + side.x * height * 0.12,
@@ -778,37 +771,12 @@ export class FootballRenderer {
       };
       this.drawStickLine(ctx, shoulder, leftHand);
       this.drawStickLine(ctx, shoulder, rightHand);
-      ctx.strokeStyle = "rgba(255,255,255,0.44)";
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.arc(head.x, head.y - headRadius * 0.78, headRadius * 1.18, Math.PI * 1.1, Math.PI * 1.9);
-      ctx.stroke();
     } else if (pose.type === "dribble") {
       const touchFoot = {
         x: hip.x + facing.x * height * 0.22,
         y: groundY - headRadius * 0.12,
       };
-      const ball = this.getBallScreenPosition(snapshot);
       this.drawStickLine(ctx, hip, touchFoot);
-      ctx.strokeStyle = "rgba(255,255,255,0.36)";
-      ctx.lineWidth = 1.3;
-      this.drawStickLine(ctx, touchFoot, ball);
-    } else if (pose.type === "sprint") {
-      this.drawActionStreak(ctx, hip, { x: -facing.x, y: -facing.y }, headRadius);
-    }
-    ctx.restore();
-  }
-
-  drawActionStreak(ctx, origin, direction, headRadius) {
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.32)";
-    ctx.lineWidth = 1.4;
-    for (let index = 0; index < 3; index += 1) {
-      const offset = (index + 1) * headRadius * 0.65;
-      ctx.beginPath();
-      ctx.moveTo(origin.x - direction.x * offset, origin.y - direction.y * offset + index * headRadius * 0.18);
-      ctx.lineTo(origin.x - direction.x * (offset + headRadius * 0.72), origin.y - direction.y * (offset + headRadius * 0.72) + index * headRadius * 0.18);
-      ctx.stroke();
     }
     ctx.restore();
   }

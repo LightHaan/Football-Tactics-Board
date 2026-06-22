@@ -10,7 +10,7 @@ import {
   SUBSTITUTIONS,
   TACTICS,
   buildTeams,
-} from "./data.js?v=38";
+} from "./data.js?v=39";
 
 const CENTER_Y = FIELD.height / 2;
 const GOAL_TOP = CENTER_Y - FIELD.goalWidth / 2;

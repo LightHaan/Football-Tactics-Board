@@ -1,6 +1,6 @@
-import { MatchSimulation } from "./simulation.js?v=38";
-import { FootballRenderer } from "./render.js?v=38";
-import { MatchAudio } from "./audio.js?v=38";
+import { MatchSimulation } from "./simulation.js?v=39";
+import { FootballRenderer } from "./render.js?v=39";
+import { MatchAudio } from "./audio.js?v=39";
 import {
   COUNTRY_DATABASE,
   COUNTRY_OPTIONS,
@@ -10,7 +10,7 @@ import {
   MATCH_TEAM_CODES,
   SUBSTITUTIONS,
   TACTIC_OPTIONS,
-} from "./data.js?v=38";
+} from "./data.js?v=39";
 
 const canvas = document.querySelector("#pitchCanvas");
 const renderer = new FootballRenderer(canvas);
