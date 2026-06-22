@@ -10,7 +10,7 @@ import {
   SUBSTITUTIONS,
   TACTICS,
   buildTeams,
-} from "./data.js?v=32";
+} from "./data.js?v=33";
 
 const CENTER_Y = FIELD.height / 2;
 const GOAL_TOP = CENTER_Y - FIELD.goalWidth / 2;
@@ -2725,6 +2725,7 @@ export class MatchSimulation extends EventTarget {
       matchSeconds: this.matchSeconds,
       referee: this.referee,
       notice: this.matchNotice,
+      restartContext: this.restartContext,
       offsideCount: this.offside?.count ?? 0,
     };
   }

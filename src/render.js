@@ -1,4 +1,4 @@
-import { FIELD, PLAYER_RENDERING } from "./data.js?v=32";
+import { FIELD, PLAYER_RENDERING } from "./data.js?v=33";
 
 const GOAL_TOP = FIELD.height / 2 - FIELD.goalWidth / 2;
 const GOAL_BOTTOM = FIELD.height / 2 + FIELD.goalWidth / 2;
@@ -48,9 +48,9 @@ export class FootballRenderer {
     this.drawAmbientBackground(ctx, width, height);
     this.drawPitch(ctx);
     this.drawBallTrail(ctx, snapshot.ball);
-    this.drawPlayers(ctx, snapshot.players);
+    this.drawPlayers(ctx, snapshot);
     this.drawReferee(ctx, snapshot.referee);
-    this.drawBall(ctx, snapshot.ball);
+    this.drawBall(ctx, snapshot);
   }
 
   drawAmbientBackground(ctx, width, height) {
@@ -154,11 +154,11 @@ export class FootballRenderer {
     ctx.restore();
   }
 
-  drawPlayers(ctx, players) {
-    const sorted = [...players].sort((a, b) => a.y - b.y);
+  drawPlayers(ctx, snapshot) {
+    const sorted = [...snapshot.players].sort((a, b) => a.y - b.y);
     for (const player of sorted) {
       if (PLAYER_RENDERING.mode === "stickman") {
-        this.drawPlayerStickman(ctx, player);
+        this.drawPlayerStickman(ctx, player, snapshot);
       } else {
         this.drawPlayerCircle(ctx, player);
       }
@@ -214,16 +214,26 @@ export class FootballRenderer {
     ctx.restore();
   }
 
-  drawPlayerStickman(ctx, player) {
+  drawPlayerStickman(ctx, player, snapshot) {
     const p = this.toScreen(player.x, player.y);
     const scale = this.bounds.scale;
     const speed = Math.hypot(player.vx, player.vy);
     const moving = speed > 0.12;
+    const pose = this.getPlayerPose(player, snapshot);
+    if (pose.type === "slide") {
+      this.drawSlidingStickman(ctx, player, pose);
+      return;
+    }
+    if (pose.type === "save") {
+      this.drawGoalkeeperDive(ctx, player, snapshot);
+      return;
+    }
     const facing = this.getPlayerFacing(player);
     const stepPhase = moving ? performance.now() * 0.01 + player.order * 0.7 : player.order * 0.7;
-    const stride = Math.sin(stepPhase) * (moving ? 1 : 0.16);
-    const counterStride = Math.sin(stepPhase + Math.PI) * (moving ? 1 : 0.16);
-    const lean = moving ? clamp(speed / 7, 0, 1) * 0.22 : 0;
+    const stridePower = pose.type === "sprint" ? 1.38 : pose.type === "dribble" ? 1.12 : 1;
+    const stride = Math.sin(stepPhase) * (moving ? stridePower : 0.16);
+    const counterStride = Math.sin(stepPhase + Math.PI) * (moving ? stridePower : 0.16);
+    const lean = moving ? clamp(speed / 7, 0, 1) * (pose.type === "sprint" ? 0.36 : 0.22) : 0;
     const headRadius = this.getPlayerHeadRadius();
     const torso = headRadius * 1.25;
     const leg = headRadius * 1.45;
@@ -326,6 +336,247 @@ export class FootballRenderer {
       ctx.fillText(String(player.number), head.x, head.y + 0.4);
     }
 
+    this.drawPoseAccent(ctx, player, snapshot, pose, {
+      head,
+      shoulder,
+      hip,
+      groundY,
+      headRadius,
+      stroke,
+      facing,
+      side,
+      height,
+    });
+
+    ctx.restore();
+  }
+
+  getPlayerPose(player, snapshot) {
+    const ball = snapshot.ball;
+    const restart = snapshot.restartContext;
+    const speed = Math.hypot(player.vx, player.vy);
+
+    if (restart?.type === "throwIn" && restart.takerId === player.id) return { type: "throwIn" };
+    if (ball.mode === "shot" && ball.shotPlayer?.id === player.id) return { type: "shot" };
+    if (this.isHeaderContest(player, ball)) return { type: "header" };
+    if (player.role === "GK" && ball.mode === "shot" && ball.teamId !== player.teamId && fieldDistance(player, ball) < 16) {
+      return { type: "save" };
+    }
+    if (player.tackleTimer > 0.34 && ball.owner?.teamId && ball.owner.teamId !== player.teamId && fieldDistance(player, ball.owner) < 5.4) {
+      return { type: "slide" };
+    }
+    if (ball.mode === "owned" && ball.owner?.id === player.id) return { type: "dribble" };
+    if (speed > 5.4) return { type: "sprint" };
+    return { type: "run" };
+  }
+
+  isHeaderContest(player, ball) {
+    if (ball.mode !== "pass" || ball.targetPlayer?.id !== player.id) return false;
+    if (ball.passKind !== "cross" && ball.passKind !== "corner") return false;
+    return fieldDistance(player, ball) < 8.5;
+  }
+
+  drawSlidingStickman(ctx, player, pose) {
+    const p = this.toScreen(player.x, player.y);
+    const headRadius = this.getPlayerHeadRadius();
+    const facing = this.getPlayerFacing(player);
+    const side = perpendicular(facing);
+    const length = headRadius * 4.6;
+    const stroke = clamp(this.bounds.scale * 0.46, 2.3, 4.2);
+    const shoulder = {
+      x: p.x - facing.x * headRadius * 0.8,
+      y: p.y + headRadius * 2.1,
+    };
+    const hip = {
+      x: p.x + facing.x * headRadius * 0.55,
+      y: p.y + headRadius * 2.55,
+    };
+    const head = {
+      x: shoulder.x - facing.x * headRadius * 0.95,
+      y: shoulder.y - headRadius * 0.52,
+    };
+    const leadFoot = {
+      x: hip.x + facing.x * length * 0.72,
+      y: hip.y + side.y * headRadius * 0.16,
+    };
+    const trailFoot = {
+      x: hip.x - facing.x * length * 0.18 - side.x * headRadius * 0.6,
+      y: hip.y + headRadius * 0.8,
+    };
+    const hand = {
+      x: shoulder.x + facing.x * headRadius * 0.5 + side.x * headRadius * 0.7,
+      y: shoulder.y + headRadius * 0.85,
+    };
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.fillStyle = "rgba(0,0,0,0.22)";
+    ctx.beginPath();
+    ctx.ellipse(hip.x, hip.y + headRadius * 1.15, length * 0.5, headRadius * 0.38, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(0,0,0,0.28)";
+    ctx.lineWidth = stroke + 2.1;
+    this.drawStickLine(ctx, shoulder, hip);
+    this.drawStickLine(ctx, hip, leadFoot);
+    this.drawStickLine(ctx, hip, trailFoot);
+    this.drawStickLine(ctx, shoulder, hand);
+
+    ctx.strokeStyle = player.color;
+    ctx.lineWidth = stroke;
+    this.drawStickLine(ctx, shoulder, hip);
+    this.drawStickLine(ctx, hip, leadFoot);
+    this.drawStickLine(ctx, hip, trailFoot);
+    this.drawStickLine(ctx, shoulder, hand);
+
+    ctx.fillStyle = player.color;
+    ctx.strokeStyle = player.trim;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, headRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255,255,255,0.34)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(leadFoot.x - facing.x * headRadius * 1.1, leadFoot.y + headRadius * 0.9);
+    ctx.lineTo(leadFoot.x - facing.x * headRadius * 2.4, leadFoot.y + headRadius * 0.7);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  drawGoalkeeperDive(ctx, player, snapshot) {
+    const p = this.toScreen(player.x, player.y);
+    const ballPoint = this.toScreen(snapshot.ball.x, snapshot.ball.y);
+    const dive = normalize(ballPoint.x - p.x, ballPoint.y - p.y);
+    const side = perpendicular(dive);
+    const headRadius = this.getPlayerHeadRadius();
+    const stroke = clamp(this.bounds.scale * 0.46, 2.4, 4.4);
+    const hip = { x: p.x - dive.x * headRadius * 0.4, y: p.y + headRadius * 2.45 };
+    const shoulder = { x: hip.x + dive.x * headRadius * 1.25, y: hip.y - headRadius * 0.78 };
+    const head = { x: shoulder.x + dive.x * headRadius * 0.8, y: shoulder.y - headRadius * 0.72 };
+    const gloveA = { x: head.x + dive.x * headRadius * 2.0 + side.x * headRadius * 0.5, y: head.y + dive.y * headRadius * 2.0 + side.y * headRadius * 0.5 };
+    const gloveB = { x: head.x + dive.x * headRadius * 1.8 - side.x * headRadius * 0.45, y: head.y + dive.y * headRadius * 1.8 - side.y * headRadius * 0.45 };
+    const footA = { x: hip.x - dive.x * headRadius * 1.4 + side.x * headRadius * 0.9, y: hip.y - dive.y * headRadius * 1.4 + side.y * headRadius * 0.9 };
+    const footB = { x: hip.x - dive.x * headRadius * 1.1 - side.x * headRadius * 0.8, y: hip.y - dive.y * headRadius * 1.1 - side.y * headRadius * 0.8 };
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.fillStyle = "rgba(0,0,0,0.2)";
+    ctx.beginPath();
+    ctx.ellipse(hip.x, hip.y + headRadius * 1.2, headRadius * 2.3, headRadius * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = player.color;
+    ctx.lineWidth = stroke;
+    this.drawStickLine(ctx, shoulder, hip);
+    this.drawStickLine(ctx, shoulder, gloveA);
+    this.drawStickLine(ctx, shoulder, gloveB);
+    this.drawStickLine(ctx, hip, footA);
+    this.drawStickLine(ctx, hip, footB);
+
+    ctx.strokeStyle = "rgba(255,230,92,0.95)";
+    ctx.lineWidth = stroke + 0.8;
+    this.drawStickLine(ctx, shoulder, gloveA);
+    this.drawStickLine(ctx, shoulder, gloveB);
+
+    ctx.fillStyle = player.color;
+    ctx.strokeStyle = player.trim;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, headRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  drawPoseAccent(ctx, player, snapshot, pose, points) {
+    const { head, shoulder, hip, groundY, headRadius, stroke, facing, side, height } = points;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = player.color;
+    ctx.lineWidth = stroke;
+
+    if (pose.type === "shot") {
+      const target = this.toScreen(snapshot.ball.targetX, snapshot.ball.targetY);
+      const kick = normalize(target.x - hip.x, target.y - hip.y);
+      const knee = {
+        x: hip.x + kick.x * height * 0.32,
+        y: hip.y + height * 0.28,
+      };
+      const foot = {
+        x: hip.x + kick.x * height * 0.58,
+        y: groundY - headRadius * 0.18,
+      };
+      this.drawStickLimb(ctx, hip, knee, foot);
+      this.drawActionStreak(ctx, foot, kick, headRadius);
+    } else if (pose.type === "throwIn") {
+      const leftElbow = {
+        x: shoulder.x + side.x * height * 0.12,
+        y: shoulder.y - height * 0.18,
+      };
+      const rightElbow = {
+        x: shoulder.x - side.x * height * 0.12,
+        y: shoulder.y - height * 0.18,
+      };
+      const leftHand = {
+        x: head.x + side.x * headRadius * 0.8,
+        y: head.y - headRadius * 1.35,
+      };
+      const rightHand = {
+        x: head.x - side.x * headRadius * 0.8,
+        y: head.y - headRadius * 1.35,
+      };
+      this.drawStickLimb(ctx, shoulder, leftElbow, leftHand);
+      this.drawStickLimb(ctx, shoulder, rightElbow, rightHand);
+    } else if (pose.type === "header") {
+      const jump = Math.sin(performance.now() * 0.018 + player.order) * headRadius * 0.14;
+      const leftHand = {
+        x: shoulder.x + side.x * height * 0.2,
+        y: shoulder.y - height * 0.12 + jump,
+      };
+      const rightHand = {
+        x: shoulder.x - side.x * height * 0.2,
+        y: shoulder.y - height * 0.12 - jump,
+      };
+      this.drawStickLine(ctx, shoulder, leftHand);
+      this.drawStickLine(ctx, shoulder, rightHand);
+      ctx.strokeStyle = "rgba(255,255,255,0.44)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(head.x, head.y - headRadius * 0.78, headRadius * 1.18, Math.PI * 1.1, Math.PI * 1.9);
+      ctx.stroke();
+    } else if (pose.type === "dribble") {
+      const touchFoot = {
+        x: hip.x + facing.x * height * 0.22,
+        y: groundY - headRadius * 0.12,
+      };
+      const ball = this.getBallScreenPosition(snapshot);
+      this.drawStickLine(ctx, hip, touchFoot);
+      ctx.strokeStyle = "rgba(255,255,255,0.36)";
+      ctx.lineWidth = 1.3;
+      this.drawStickLine(ctx, touchFoot, ball);
+    } else if (pose.type === "sprint") {
+      this.drawActionStreak(ctx, hip, { x: -facing.x, y: -facing.y }, headRadius);
+    }
+    ctx.restore();
+  }
+
+  drawActionStreak(ctx, origin, direction, headRadius) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,0.32)";
+    ctx.lineWidth = 1.4;
+    for (let index = 0; index < 3; index += 1) {
+      const offset = (index + 1) * headRadius * 0.65;
+      ctx.beginPath();
+      ctx.moveTo(origin.x - direction.x * offset, origin.y - direction.y * offset + index * headRadius * 0.18);
+      ctx.lineTo(origin.x - direction.x * (offset + headRadius * 0.72), origin.y - direction.y * (offset + headRadius * 0.72) + index * headRadius * 0.18);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -434,8 +685,8 @@ export class FootballRenderer {
     return clamp(this.bounds.scale * 1.35, 8, 16);
   }
 
-  drawBall(ctx, ball) {
-    const p = this.getBallScreenPosition(ball);
+  drawBall(ctx, snapshot) {
+    const p = this.getBallScreenPosition(snapshot);
     const radius = clamp(this.bounds.scale * 0.55, 4, 7);
     ctx.save();
     ctx.shadowColor = "rgba(0,0,0,0.42)";
@@ -451,7 +702,27 @@ export class FootballRenderer {
     ctx.restore();
   }
 
-  getBallScreenPosition(ball) {
+  getBallScreenPosition(snapshot) {
+    const { ball, restartContext, players } = snapshot;
+    if (restartContext?.type === "throwIn" && PLAYER_RENDERING.mode === "stickman") {
+      const taker = players.find((player) => player.id === restartContext.takerId);
+      if (taker) {
+        const head = this.toScreen(taker.x, taker.y);
+        const headRadius = this.getPlayerHeadRadius();
+        return {
+          x: head.x,
+          y: head.y - headRadius * 1.55,
+        };
+      }
+    }
+    if (PLAYER_RENDERING.mode === "stickman" && ball.mode === "pass" && ball.targetPlayer && this.isHeaderContest(ball.targetPlayer, ball)) {
+      const head = this.toScreen(ball.targetPlayer.x, ball.targetPlayer.y);
+      const headRadius = this.getPlayerHeadRadius();
+      return {
+        x: head.x,
+        y: head.y - headRadius * 0.92,
+      };
+    }
     if (ball.mode === "owned" && ball.owner && PLAYER_RENDERING.mode === "stickman") {
       const owner = ball.owner;
       const head = this.toScreen(owner.x, owner.y);
