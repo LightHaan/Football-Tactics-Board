@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>足球战术板</title>
-    <link rel="stylesheet" href="./styles.css?v=33" />
+    <link rel="stylesheet" href="./styles.css?v=37" />
   </head>
   <body>
     <main class="match-shell" aria-label="足球战术板">
@@ -71,6 +71,14 @@
         <label class="setup-field auto-substitution-field">
           <span>自动换人</span>
           <input id="autoSubstitutionToggle" type="checkbox" checked />
+        </label>
+        <label class="setup-field tactic-guide-field">
+          <span>战术示意</span>
+          <select id="tacticGuideSelect">
+            <option value="off" selected>关闭</option>
+            <option value="implicit">隐式</option>
+            <option value="explicit">显式</option>
+          </select>
         </label>
         <button id="startMatchButton" class="start-button" type="button">开始</button>
       </section>
@@ -143,6 +151,6 @@
       </aside>
     </main>
 
-    <script type="module" src="./src/app.js?v=33"></script>
+    <script type="module" src="./src/app.js?v=37"></script>
   </body>
 </html>

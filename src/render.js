@@ -1,4 +1,4 @@
-import { FIELD, PLAYER_RENDERING } from "./data.js?v=33";
+import { FIELD, PLAYER_RENDERING } from "./data.js?v=37";
 
 const GOAL_TOP = FIELD.height / 2 - FIELD.goalWidth / 2;
 const GOAL_BOTTOM = FIELD.height / 2 + FIELD.goalWidth / 2;
@@ -9,8 +9,13 @@ export class FootballRenderer {
     this.ctx = canvas.getContext("2d");
     this.pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     this.bounds = { x: 0, y: 0, width: 1, height: 1, scale: 1 };
+    this.tacticGuideMode = "off";
     window.addEventListener("resize", () => this.resize());
     this.resize();
+  }
+
+  setTacticGuideMode(mode) {
+    this.tacticGuideMode = ["implicit", "explicit"].includes(mode) ? mode : "off";
   }
 
   resize() {
@@ -47,6 +52,7 @@ export class FootballRenderer {
     ctx.clearRect(0, 0, width, height);
     this.drawAmbientBackground(ctx, width, height);
     this.drawPitch(ctx);
+    this.drawTacticGuides(ctx, snapshot);
     this.drawBallTrail(ctx, snapshot.ball);
     this.drawPlayers(ctx, snapshot);
     this.drawReferee(ctx, snapshot.referee);
@@ -135,6 +141,233 @@ export class FootballRenderer {
     ctx.lineWidth = 1.2;
     ctx.strokeRect(-2, GOAL_TOP, 2, FIELD.goalWidth);
     ctx.strokeRect(FIELD.width, GOAL_TOP, 2, FIELD.goalWidth);
+    ctx.restore();
+  }
+
+  drawTacticGuides(ctx, snapshot) {
+    if (this.tacticGuideMode === "off") return;
+    if (!snapshot || snapshot.state === "preMatch" || snapshot.state === "fullTime") return;
+
+    const ball = snapshot.ball;
+    const teamId = ball.owner?.teamId ?? ball.teamId ?? ball.shotTeamId;
+    const team = snapshot.teams.find((currentTeam) => currentTeam.id === teamId);
+    if (!team) return;
+
+    const owner = ball.owner?.teamId === team.id ? ball.owner : null;
+    const players = snapshot.players.filter((player) => player.teamId === team.id && player.role !== "GK");
+    const pulse = 0.82 + Math.sin(performance.now() * 0.012) * 0.18;
+
+    this.drawGuideSupportLanes(ctx, team, players, owner, pulse);
+    for (const route of this.getGuideRunRoutes(team, players, ball, owner)) {
+      this.drawGuideArrow(ctx, route.from, route.to, {
+        color: rgbaFromColor(route.player.color, route.alpha * pulse),
+        width: route.isOwner ? 2.6 : 1.7,
+        headSize: route.isOwner ? 1.35 : 1,
+        dash: route.isOwner ? [] : [7, 8],
+        targetDot: route.isOwner || this.tacticGuideMode === "explicit",
+      });
+    }
+    this.drawCommittedBallRoute(ctx, ball, team, owner, pulse);
+  }
+
+  getGuideRunRoutes(team, players, ball, owner) {
+    const ballPoint = { x: ball.x, y: ball.y };
+    const targetPlayerId = ball.targetPlayer?.id ?? "";
+    const explicit = this.tacticGuideMode === "explicit";
+    const roleBonus = { ST: 10, W: 8, AM: 7, CM: 4, FB: 3, DM: 2, CB: 1 };
+
+    return players
+      .map((player) => {
+        const target = {
+          x: player.targetX ?? player.x,
+          y: player.targetY ?? player.y,
+        };
+        const distance = fieldDistance(player, target);
+        const targetAdvance = (team.direction ?? 1) * (target.x - player.x);
+        const nearBall = Math.max(0, 26 - fieldDistance(player, ballPoint));
+        const isOwner = owner?.id === player.id;
+        const isTarget = targetPlayerId === player.id;
+        const score =
+          distance * 2.3 +
+          clamp(targetAdvance, -4, 16) * 0.9 +
+          nearBall * 0.22 +
+          (roleBonus[player.role] ?? 0) +
+          (isOwner ? 22 : 0) +
+          (isTarget ? 18 : 0);
+        return {
+          player,
+          from: { x: player.x, y: player.y },
+          to: target,
+          distance,
+          score,
+          isOwner,
+          isTarget,
+          alpha: isOwner ? 0.76 : explicit ? 0.58 : 0.46,
+        };
+      })
+      .filter((route) => route.distance > 1.15)
+      .filter((route) => {
+        if (explicit) return true;
+        return route.isOwner || route.isTarget || fieldDistance(route.player, ballPoint) < 22 || route.score > 24;
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, explicit ? 9 : 4);
+  }
+
+  drawGuideSupportLanes(ctx, team, players, owner, pulse) {
+    if (this.tacticGuideMode !== "explicit" || !owner) return;
+    const tacticId = team.tactic?.id ?? "balanced";
+    const roleBias = {
+      wingCross: { W: 18, FB: 12, ST: 8, AM: 5, CM: 2 },
+      centralPenetration: { ST: 16, AM: 14, CM: 10, W: 4, FB: 1 },
+      balanced: { ST: 11, AM: 9, W: 8, CM: 7, FB: 4 },
+    }[tacticId] ?? { ST: 10, AM: 8, W: 8, CM: 6, FB: 4 };
+
+    const lanes = players
+      .filter((player) => player.id !== owner.id)
+      .map((player) => {
+        const target = {
+          x: player.targetX ?? player.x,
+          y: player.targetY ?? player.y,
+        };
+        const distance = fieldDistance(owner, target);
+        const forwardGain = (team.direction ?? 1) * (target.x - owner.x);
+        const width = Math.abs(target.y - FIELD.height / 2) / (FIELD.height / 2);
+        const centrality = 1 - width;
+        const tacticShape =
+          tacticId === "wingCross"
+            ? width * 18
+            : tacticId === "centralPenetration"
+              ? centrality * 18
+              : 8;
+        return {
+          player,
+          target,
+          distance,
+          score:
+            forwardGain * 1.35 +
+            (roleBias[player.role] ?? 0) +
+            tacticShape -
+            Math.abs(distance - 23) * 0.65 +
+            clamp(player.attributes?.passing ?? 58, 35, 90) * 0.08,
+        };
+      })
+      .filter((lane) => lane.distance > 7 && lane.distance < 48)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 2);
+
+    for (const lane of lanes) {
+      this.drawGuideArrow(ctx, { x: owner.x, y: owner.y }, lane.target, {
+        color: `rgba(255,255,255,${0.26 * pulse})`,
+        width: 1.25,
+        dash: [4, 10],
+        headSize: 0.82,
+        targetDot: false,
+      });
+    }
+  }
+
+  drawCommittedBallRoute(ctx, ball, team, owner, pulse) {
+    if (ball.mode === "pass" && ball.teamId === team.id && ball.targetPlayer) {
+      const start = ball.trail?.[0] ?? { x: ball.lastX, y: ball.lastY };
+      const routeColor =
+        ball.passKind === "cross" || ball.passKind === "corner"
+          ? `rgba(125,211,252,${0.82 * pulse})`
+          : `rgba(255,238,148,${0.86 * pulse})`;
+      this.drawGuideArrow(ctx, start, { x: ball.targetX, y: ball.targetY }, {
+        color: routeColor,
+        width: 2.8,
+        headSize: 1.45,
+        targetDot: true,
+      });
+      return;
+    }
+
+    if (ball.mode === "shot" && ball.shotTeamId === team.id) {
+      const start = ball.trail?.[0] ?? ball.shotPlayer ?? { x: ball.lastX, y: ball.lastY };
+      this.drawGuideArrow(ctx, start, { x: ball.targetX, y: ball.targetY }, {
+        color: `rgba(255,171,84,${0.9 * pulse})`,
+        width: 3,
+        headSize: 1.55,
+        targetDot: true,
+      });
+      return;
+    }
+
+    if (ball.mode === "owned" && owner) {
+      this.drawGuideArrow(ctx, { x: owner.x, y: owner.y }, { x: owner.targetX, y: owner.targetY }, {
+        color: `rgba(255,255,255,${0.42 * pulse})`,
+        width: 1.7,
+        dash: [6, 7],
+        headSize: 0.95,
+        targetDot: false,
+      });
+    }
+  }
+
+  drawGuideArrow(ctx, fromField, toField, options = {}) {
+    const from = this.toScreen(fromField.x, fromField.y);
+    const to = this.toScreen(toField.x, toField.y);
+    const length = Math.hypot(to.x - from.x, to.y - from.y);
+    if (length < 7) return;
+
+    const direction = normalize(to.x - from.x, to.y - from.y);
+    const side = perpendicular(direction);
+    const headSize = clamp(this.bounds.scale * 1.75 * (options.headSize ?? 1), 7, 15);
+    const lineEnd = {
+      x: to.x - direction.x * headSize * 0.56,
+      y: to.y - direction.y * headSize * 0.56,
+    };
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = options.color ?? "rgba(255,255,255,0.42)";
+    ctx.fillStyle = options.color ?? "rgba(255,255,255,0.42)";
+    const lineWidth = clamp(this.bounds.scale * (options.width ?? 1.6), 1.1, 4.2);
+    ctx.lineWidth = lineWidth + 2.4;
+    ctx.strokeStyle = "rgba(6,12,9,0.3)";
+    ctx.setLineDash(options.dash ?? []);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(lineEnd.x, lineEnd.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = options.color ?? "rgba(255,255,255,0.42)";
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(lineEnd.x, lineEnd.y);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(to.x, to.y);
+    ctx.lineTo(to.x - direction.x * headSize + side.x * headSize * 0.42, to.y - direction.y * headSize + side.y * headSize * 0.42);
+    ctx.lineTo(to.x - direction.x * headSize - side.x * headSize * 0.42, to.y - direction.y * headSize - side.y * headSize * 0.42);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(6,12,9,0.3)";
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(to.x, to.y);
+    ctx.lineTo(to.x - direction.x * headSize + side.x * headSize * 0.42, to.y - direction.y * headSize + side.y * headSize * 0.42);
+    ctx.lineTo(to.x - direction.x * headSize - side.x * headSize * 0.42, to.y - direction.y * headSize - side.y * headSize * 0.42);
+    ctx.closePath();
+    ctx.fillStyle = options.color ?? "rgba(255,255,255,0.42)";
+    ctx.fill();
+
+    if (options.targetDot) {
+      ctx.lineWidth = 1.3;
+      ctx.strokeStyle = "rgba(6,12,9,0.36)";
+      ctx.beginPath();
+      ctx.arc(to.x, to.y, clamp(headSize * 0.42, 4.2, 7.2), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = options.color ?? "rgba(255,255,255,0.42)";
+      ctx.beginPath();
+      ctx.arc(to.x, to.y, clamp(headSize * 0.38, 3.4, 6.4), 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -762,4 +995,28 @@ function normalize(x, y) {
 
 function perpendicular(vector) {
   return { x: -vector.y, y: vector.x };
+}
+
+function fieldDistance(a, b) {
+  if (!a || !b) return Infinity;
+  return Math.hypot((a.x ?? 0) - (b.x ?? 0), (a.y ?? 0) - (b.y ?? 0));
+}
+
+function rgbaFromColor(color, alpha) {
+  const safeAlpha = clamp(alpha, 0, 1);
+  const hex = String(color ?? "").trim();
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex);
+  if (!match) return `rgba(255,255,255,${safeAlpha})`;
+
+  const value =
+    match[1].length === 3
+      ? match[1]
+          .split("")
+          .map((digit) => digit + digit)
+          .join("")
+      : match[1];
+  const red = Number.parseInt(value.slice(0, 2), 16);
+  const green = Number.parseInt(value.slice(2, 4), 16);
+  const blue = Number.parseInt(value.slice(4, 6), 16);
+  return `rgba(${red},${green},${blue},${safeAlpha})`;
 }

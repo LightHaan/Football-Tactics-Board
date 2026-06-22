@@ -1,6 +1,6 @@
-import { MatchSimulation } from "./simulation.js?v=33";
-import { FootballRenderer } from "./render.js?v=33";
-import { MatchAudio } from "./audio.js?v=33";
+import { MatchSimulation } from "./simulation.js?v=37";
+import { FootballRenderer } from "./render.js?v=37";
+import { MatchAudio } from "./audio.js?v=37";
 import {
   COUNTRY_DATABASE,
   COUNTRY_OPTIONS,
@@ -10,17 +10,19 @@ import {
   MATCH_TEAM_CODES,
   SUBSTITUTIONS,
   TACTIC_OPTIONS,
-} from "./data.js?v=33";
+} from "./data.js?v=37";
 
 const canvas = document.querySelector("#pitchCanvas");
 const renderer = new FootballRenderer(canvas);
-const simulation = new MatchSimulation();
+const simulation = new MatchSimulation({ autoStart: false });
 const audio = new MatchAudio();
 window.__autoFootballDebug = {
   getSnapshot: () => simulation.getSnapshot(),
+  getTacticGuideMode: () => renderer.tacticGuideMode,
 };
 
 const ui = {
+  shell: document.querySelector(".match-shell"),
   homeName: document.querySelector("#homeName"),
   awayName: document.querySelector("#awayName"),
   homeCrest: document.querySelector("#homeCrest"),
@@ -57,6 +59,7 @@ const ui = {
   matchLengthSelect: document.querySelector("#matchLengthSelect"),
   soundToggle: document.querySelector("#soundToggle"),
   autoSubstitutionToggle: document.querySelector("#autoSubstitutionToggle"),
+  tacticGuideSelect: document.querySelector("#tacticGuideSelect"),
   startMatchButton: document.querySelector("#startMatchButton"),
   substitutionTeamSelect: document.querySelector("#substitutionTeamSelect"),
   substitutionOutSelect: document.querySelector("#substitutionOutSelect"),
@@ -114,6 +117,7 @@ ui.homeFormationSelect.addEventListener("change", () => renderLineupEditor("home
 ui.awayFormationSelect.addEventListener("change", () => renderLineupEditor("away"));
 ui.tacticApplyButton.addEventListener("click", handleApplyTactics);
 ui.soundToggle.addEventListener("change", handleSoundToggle);
+ui.tacticGuideSelect.addEventListener("change", handleTacticGuideChanged);
 ui.startMatchButton.addEventListener("click", startConfiguredMatch);
 ui.substitutionTeamSelect.addEventListener("change", handleSubstitutionTeamChanged);
 ui.substitutionOutSelect.addEventListener("change", handleSubstitutionPlayerChanged);
@@ -381,12 +385,13 @@ function populateSubstitutionPlayerSelect(select, players, selectedId) {
 function updateSubstitutionButtonState(snapshot) {
   const team = snapshot.teams.find((currentTeam) => currentTeam.id === substitutionControls.selectedTeamId);
   const hasSelection = Boolean(ui.substitutionOutSelect.value && ui.substitutionInSelect.value);
-  const canUse = team && snapshot.state !== "fullTime" && team.substitutionsUsed < SUBSTITUTIONS.maxPerTeam && hasSelection;
+  const matchStarted = ["playing", "goalPause", "restartPause"].includes(snapshot.state);
+  const canUse = team && matchStarted && team.substitutionsUsed < SUBSTITUTIONS.maxPerTeam && hasSelection;
   ui.substitutionButton.disabled = !canUse;
 }
 
 function updateTacticApplyButtonState(snapshot) {
-  ui.tacticApplyButton.disabled = snapshot.state === "fullTime";
+  ui.tacticApplyButton.disabled = snapshot.state === "preMatch" || snapshot.state === "fullTime";
 }
 
 function handleApplyTactics() {
@@ -497,6 +502,10 @@ function handleSoundToggle() {
   if (ui.soundToggle.checked) audio.unlock();
 }
 
+function handleTacticGuideChanged() {
+  renderer.setTacticGuideMode(ui.tacticGuideSelect.value);
+}
+
 function playEventSound(eventText) {
   if (eventText === lastSoundEvent) return;
   lastSoundEvent = eventText;
@@ -512,6 +521,7 @@ function setSetupPanelOpen(isOpen) {
   ui.setupPanel.classList.toggle("is-hidden", !isOpen);
   ui.settingsToggle.setAttribute("aria-expanded", String(isOpen));
   ui.settingsToggle.textContent = isOpen ? "收起" : "设置";
+  updatePanelStateClass();
 }
 
 function toggleTacticsPanel() {
@@ -523,8 +533,19 @@ function setTacticsPanelOpen(isOpen) {
   ui.tacticsPanel.classList.toggle("is-hidden", !isOpen);
   ui.tacticsToggle.setAttribute("aria-expanded", String(isOpen));
   ui.tacticsToggle.textContent = isOpen ? "收起" : "战术";
+  updatePanelStateClass();
+}
+
+function updatePanelStateClass() {
+  const setupOpen = !ui.setupPanel.classList.contains("is-hidden");
+  const tacticsOpen = !ui.tacticsPanel.classList.contains("is-hidden");
+  ui.shell.classList.toggle("has-open-panel", setupOpen || tacticsOpen);
+  ui.shell.classList.toggle("has-setup-panel", setupOpen);
+  ui.shell.classList.toggle("has-tactics-panel", tacticsOpen);
 }
 
 updateUi(simulation.getSnapshot());
 updateDebugAttributes(simulation.getSnapshot());
+renderer.setTacticGuideMode(ui.tacticGuideSelect.value);
+setSetupPanelOpen(true);
 requestAnimationFrame(frame);

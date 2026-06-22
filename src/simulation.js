@@ -10,7 +10,7 @@ import {
   SUBSTITUTIONS,
   TACTICS,
   buildTeams,
-} from "./data.js?v=33";
+} from "./data.js?v=37";
 
 const CENTER_Y = FIELD.height / 2;
 const GOAL_TOP = CENTER_Y - FIELD.goalWidth / 2;
@@ -31,6 +31,7 @@ export class MatchSimulation extends EventTarget {
     this.matchSeconds = options.matchSeconds ?? MATCH.seconds;
     this.matchConfig = options.matchConfig ?? {};
     this.autoSubstitutionsEnabled = options.autoSubstitutionsEnabled ?? true;
+    this.autoStart = options.autoStart ?? true;
     this.resetMatch();
   }
 
@@ -38,16 +39,17 @@ export class MatchSimulation extends EventTarget {
     if (options.teamCodes) this.matchTeamCodes = options.teamCodes;
     if (options.matchSeconds) this.matchSeconds = options.matchSeconds;
     if (options.matchConfig) this.matchConfig = options.matchConfig;
+    if (typeof options.autoStart === "boolean") this.autoStart = options.autoStart;
     if (typeof options.autoSubstitutionsEnabled === "boolean") {
       this.autoSubstitutionsEnabled = options.autoSubstitutionsEnabled;
     }
     this.teams = buildTeams(this.matchTeamCodes, this.matchConfig);
     this.players = this.teams.flatMap((team) => team.players);
     this.clock = 0;
-    this.state = "playing";
+    this.state = this.autoStart ? "playing" : "preMatch";
     this.pauseTimer = 0;
-    this.phaseText = "开球";
-    this.eventText = "比赛开始";
+    this.phaseText = this.autoStart ? "开球" : "赛前准备";
+    this.eventText = this.autoStart ? "比赛开始" : "请选择球队，点击开始后开局";
     this.restartContext = null;
     this.discipline = this.createDisciplinePlan();
     this.offside = this.createOffsidePlan();
@@ -87,11 +89,17 @@ export class MatchSimulation extends EventTarget {
       releaseIgnoreTimer: 0,
       restartKind: null,
     };
-    this.kickoff(Math.random() > 0.5 ? this.teams[0] : this.teams[1], "开球");
+    if (this.autoStart) this.kickoff(Math.random() > 0.5 ? this.teams[0] : this.teams[1], "开球");
   }
 
   update(realDt) {
     const dt = Math.min(realDt, 0.05) * MATCH.timeScale;
+
+    if (this.state === "preMatch") {
+      this.updateMatchNotice(dt);
+      this.setRestingTargets();
+      return;
+    }
 
     if (this.state === "goalPause" || this.state === "fullTime" || this.state === "restartPause") {
       this.pauseTimer -= dt;
@@ -425,6 +433,7 @@ export class MatchSimulation extends EventTarget {
   performManualSubstitution(teamId, outgoingId, incomingId) {
     const team = this.getTeam(teamId);
     if (!team) return { ok: false, message: "没有找到球队" };
+    if (this.state === "preMatch") return { ok: false, message: "比赛开始后才能换人" };
     if (this.state === "fullTime") return { ok: false, message: "全场结束后不能换人" };
     if (team.substitutionsUsed >= SUBSTITUTIONS.maxPerTeam) return { ok: false, message: "换人次数已用完" };
     const outgoing = team.players.find((player) => player.id === outgoingId);
@@ -482,6 +491,7 @@ export class MatchSimulation extends EventTarget {
   applyTeamTactics(teamId, options = {}) {
     const team = this.getTeam(teamId);
     if (!team) return { ok: false, message: "没有找到球队" };
+    if (this.state === "preMatch") return { ok: false, message: "开赛前选择后点击开始" };
     if (this.state === "fullTime") return { ok: false, message: "全场结束后不能调整战术" };
 
     const formation = options.formation ?? team.formation;
@@ -623,7 +633,7 @@ export class MatchSimulation extends EventTarget {
   startNewMatch(options = {}) {
     this.round = 1;
     this.lastResult = null;
-    this.resetMatch(options);
+    this.resetMatch({ ...options, autoStart: options.autoStart ?? true });
   }
 
   updateTactics(dt) {

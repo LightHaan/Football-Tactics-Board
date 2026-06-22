@@ -70,6 +70,20 @@ body {
   display: none;
 }
 
+.match-shell.has-setup-panel .match-notice {
+  right: clamp(12px, 2vw, 24px);
+  left: auto;
+  width: min(420px, calc(100vw - 48px));
+  transform: none;
+}
+
+.match-shell.has-tactics-panel .match-notice {
+  right: auto;
+  left: clamp(12px, 2vw, 24px);
+  width: min(420px, calc(100vw - 48px));
+  transform: none;
+}
+
 .match-notice.is-offside {
   border-color: rgba(255, 255, 255, 0.86);
 }
@@ -160,11 +174,11 @@ body {
   z-index: 2;
   top: clamp(122px, 16vh, 148px);
   left: clamp(12px, 2vw, 24px);
-  width: min(640px, calc(100vw - 24px));
+  width: min(760px, calc(100vw - 24px));
   max-height: calc(100vh - 168px);
   overflow: auto;
   display: grid;
-  grid-template-columns: repeat(6, minmax(76px, 1fr));
+  grid-template-columns: repeat(7, minmax(76px, 1fr));
   align-items: end;
   gap: 8px;
   padding: 10px;
@@ -599,6 +613,12 @@ body {
 .last-result {
   color: var(--muted);
   font-size: 12px;
+}
+
+@media (max-width: 1240px) {
+  .match-shell.has-open-panel .match-notice {
+    display: none;
+  }
 }
 
 @media (max-width: 680px) {
