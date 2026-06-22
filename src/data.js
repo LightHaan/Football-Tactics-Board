@@ -1260,6 +1260,7 @@ function createActivePlayer(country, sideId, direction, slot, index, sourcePlaye
     targetY: anchor.y,
     decisionTimer: 0,
     tackleTimer: 0,
+    tackleCooldown: 0,
     staminaNoise: Math.random() * 0.12 + 0.94,
     order: index,
   };

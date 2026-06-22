@@ -1,4 +1,4 @@
-import { FIELD, PLAYER_RENDERING } from "./data.js?v=37";
+import { FIELD, PLAYER_RENDERING } from "./data.js?v=38";
 
 const GOAL_TOP = FIELD.height / 2 - FIELD.goalWidth / 2;
 const GOAL_BOTTOM = FIELD.height / 2 + FIELD.goalWidth / 2;
@@ -53,7 +53,7 @@ export class FootballRenderer {
     this.drawAmbientBackground(ctx, width, height);
     this.drawPitch(ctx);
     this.drawTacticGuides(ctx, snapshot);
-    this.drawBallTrail(ctx, snapshot.ball);
+    if (this.tacticGuideMode !== "off") this.drawBallTrail(ctx, snapshot.ball);
     this.drawPlayers(ctx, snapshot);
     this.drawReferee(ctx, snapshot.referee);
     this.drawBall(ctx, snapshot);

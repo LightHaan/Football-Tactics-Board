@@ -10,7 +10,7 @@ import {
   SUBSTITUTIONS,
   TACTICS,
   buildTeams,
-} from "./data.js?v=37";
+} from "./data.js?v=38";
 
 const CENTER_Y = FIELD.height / 2;
 const GOAL_TOP = CENTER_Y - FIELD.goalWidth / 2;
@@ -220,7 +220,8 @@ export class MatchSimulation extends EventTarget {
       player.vx = 0;
       player.vy = 0;
       player.decisionTimer = rand(0.2, 0.9);
-      player.tackleTimer = rand(0.1, 0.7);
+      player.tackleTimer = 0;
+      player.tackleCooldown = rand(0.1, 0.7);
     });
 
     const taker = team.players
@@ -465,7 +466,8 @@ export class MatchSimulation extends EventTarget {
       vx: 0,
       vy: 0,
       decisionTimer: rand(0.12, 0.5),
-      tackleTimer: rand(0.2, 0.7),
+      tackleTimer: 0,
+      tackleCooldown: rand(0.2, 0.7),
       staminaNoise: Math.random() * 0.1 + 0.98,
     };
 
@@ -682,6 +684,7 @@ export class MatchSimulation extends EventTarget {
     this.players.forEach((player) => {
       if (player.role === "GK") this.constrainGoalkeeper(player);
       player.tackleTimer = Math.max(0, player.tackleTimer - dt);
+      player.tackleCooldown = Math.max(0, (player.tackleCooldown ?? 0) - dt);
       player.decisionTimer = Math.max(0, player.decisionTimer - dt);
     });
   }
@@ -1710,12 +1713,13 @@ export class MatchSimulation extends EventTarget {
     const receivingTeam = this.getTeam(this.ball.teamId);
     const opponents = this.getOpponents(receivingTeam.id);
     for (const opponent of opponents) {
-      if (opponent.tackleTimer > 0) continue;
+      if ((opponent.tackleCooldown ?? opponent.tackleTimer ?? 0) > 0) continue;
       const d = dist(opponent, this.ball);
       if (d < 2.2) {
         if (this.tryBlockCrossForCorner(opponent, d)) return;
         const interceptChance = clamp((opponent.attributes.defense / 100) * (1 - d / 2.4) * (1 - this.ball.quality * 0.45), 0.06, 0.74);
-        opponent.tackleTimer = rand(0.4, 1.1);
+        opponent.tackleTimer = rand(0.12, 0.28);
+        opponent.tackleCooldown = rand(0.65, 1.25);
         if (chance(interceptChance)) {
           this.takePossession(opponent, `${this.getTeam(opponent.teamId).shortName} ${playerLabel(opponent)}抄截成功`);
           this.emitUpdate();
@@ -1761,7 +1765,8 @@ export class MatchSimulation extends EventTarget {
       0.62,
     );
     if (!chance(blockChance)) return false;
-    defender.tackleTimer = rand(0.5, 1.1);
+    defender.tackleTimer = rand(0.36, 0.52);
+    defender.tackleCooldown = rand(1.2, 2.2);
     this.referee.whistleTimer = 0.75;
     return this.scheduleForcedCorner(
       attackingTeam,
@@ -2518,15 +2523,17 @@ export class MatchSimulation extends EventTarget {
     const team = this.getTeam(carrier.teamId);
     const opponents = this.getOpponents(team.id);
     const nearest = this.nearestPlayer(carrier, opponents.filter((player) => player.role !== "GK"));
-    if (!nearest || nearest.tackleTimer > 0) return;
+    if (!nearest || (nearest.tackleCooldown ?? nearest.tackleTimer ?? 0) > 0) return;
 
     const d = dist(carrier, nearest);
-    if (d < 2.6) {
+    if (d < 2.45) {
       const tackleStrength = nearest.attributes.defense / (nearest.attributes.defense + carrier.attributes.dribbling);
       if (this.tryTouchlineChallengeForThrowIn(carrier, nearest, dt)) return;
       if (this.tryCommitFoul(nearest, carrier, d, tackleStrength, dt)) return;
       const tackleChance = clamp((2.8 - d) * tackleStrength * dt * 0.62, 0, 0.42);
-      nearest.tackleTimer = rand(0.18, 0.62);
+      const slideCommit = d < 1.9 && tackleStrength > 0.46 && chance(0.14 + nearest.attributes.defense / 520);
+      nearest.tackleTimer = slideCommit ? rand(0.42, 0.58) : rand(0.1, 0.26);
+      nearest.tackleCooldown = slideCommit ? rand(1.45, 2.7) : rand(0.8, 1.55);
       if (chance(tackleChance)) {
         if (chance(0.72)) {
           this.takePossession(nearest, `${this.getTeam(nearest.teamId).shortName} ${playerLabel(nearest)}抢断`);
