@@ -1,6 +1,6 @@
-import { MatchSimulation } from "./simulation.js?v=31";
-import { FootballRenderer } from "./render.js?v=31";
-import { MatchAudio } from "./audio.js?v=31";
+import { MatchSimulation } from "./simulation.js?v=32";
+import { FootballRenderer } from "./render.js?v=32";
+import { MatchAudio } from "./audio.js?v=32";
 import {
   COUNTRY_DATABASE,
   COUNTRY_OPTIONS,
@@ -10,7 +10,7 @@ import {
   MATCH_TEAM_CODES,
   SUBSTITUTIONS,
   TACTIC_OPTIONS,
-} from "./data.js?v=31";
+} from "./data.js?v=32";
 
 const canvas = document.querySelector("#pitchCanvas");
 const renderer = new FootballRenderer(canvas);
@@ -166,6 +166,7 @@ function updateMatchNotice(notice) {
   ui.matchNotice.classList.toggle("is-penalty", isVisible && notice.type === "penalty");
   ui.matchNotice.classList.toggle("is-free-kick", isVisible && notice.type === "freeKick");
   ui.matchNotice.classList.toggle("is-substitution", isVisible && notice.type === "substitution");
+  ui.matchNotice.classList.toggle("is-goal", isVisible && notice.type === "goal");
   if (!isVisible) return;
   ui.noticeTitle.textContent = notice.title;
   ui.noticeMessage.textContent = notice.message;

@@ -10,7 +10,7 @@ import {
   SUBSTITUTIONS,
   TACTICS,
   buildTeams,
-} from "./data.js?v=31";
+} from "./data.js?v=32";
 
 const CENTER_Y = FIELD.height / 2;
 const GOAL_TOP = CENTER_Y - FIELD.goalWidth / 2;
@@ -916,7 +916,7 @@ export class MatchSimulation extends EventTarget {
     const pressure = clamp((9 - pressureDistance) / 9, 0, 1);
 
     if (carrier.decisionTimer > 0) {
-      const earlyTrapPass = this.chooseOffsideTrapPass(carrier, team, opponents, pressure);
+      const earlyTrapPass = team.tactic.id === "wingCross" ? null : this.chooseOffsideTrapPass(carrier, team, opponents, pressure);
       if (!earlyTrapPass) return;
       carrier.decisionTimer = 0;
     }
@@ -960,7 +960,7 @@ export class MatchSimulation extends EventTarget {
       return;
     }
 
-    const offsideTrapPass = this.chooseOffsideTrapPass(carrier, team, opponents, pressure);
+    const offsideTrapPass = team.tactic.id === "wingCross" ? null : this.chooseOffsideTrapPass(carrier, team, opponents, pressure);
     if (offsideTrapPass && chance(offsideTrapPass.chance)) {
       this.pass(carrier, offsideTrapPass.player, team, offsideTrapPass.score, offsideTrapPass.context);
       return;
@@ -1211,6 +1211,7 @@ export class MatchSimulation extends EventTarget {
     const progress = team.direction * (player.x - FIELD.width / 2);
     const width = Math.abs(player.y - CENTER_Y);
     const canCross = player.role === "W" || player.role === "FB" || player.role === "AM";
+    if (team.tactic.id === "wingCross") return canCross && progress > 10 && width > 12;
     return canCross && progress > 18 && width > 17;
   }
 
@@ -1836,6 +1837,13 @@ export class MatchSimulation extends EventTarget {
           ? "任意球破门"
           : "破门";
     this.eventText = `${attackingTeam.shortName} ${playerLabel(this.ball.shotPlayer)}${finishText}，比分 ${this.teams[0].score}:${this.teams[1].score}`;
+    this.showMatchNotice(
+      "goal",
+      "进球",
+      `${attackingTeam.shortName} ${playerLabel(this.ball.shotPlayer)}，比分 ${this.teams[0].score}:${this.teams[1].score}`,
+      attackingTeam.id,
+      3.2,
+    );
     this.ball.mode = "loose";
     this.ball.owner = null;
     this.ball.vx = 0;

@@ -75,8 +75,87 @@ export class MatchAudio {
   }
 
   playWhistle() {
-    this.tone({ frequency: 1560, type: "sine", attack: 0.01, decay: 0.18, gain: 0.22 });
-    this.tone({ frequency: 1860, type: "sine", attack: 0.008, decay: 0.12, gain: 0.12, delay: 0.04 });
+    this.refereeWhistlePulse({ delay: 0, duration: 0.34, baseFrequency: 2860, gain: 0.28 });
+    this.refereeWhistlePulse({ delay: 0.38, duration: 0.25, baseFrequency: 3150, gain: 0.2 });
+  }
+
+  refereeWhistlePulse({ delay, duration, baseFrequency, gain }) {
+    if (!this.context || !this.master) return;
+    const start = this.context.currentTime + delay;
+    const end = start + duration;
+    const carrier = this.context.createOscillator();
+    const harmonic = this.context.createOscillator();
+    const lfo = this.context.createOscillator();
+    const lfoGain = this.context.createGain();
+    const mix = this.context.createGain();
+    const harmonicGain = this.context.createGain();
+    const envelope = this.context.createGain();
+
+    carrier.type = "sine";
+    harmonic.type = "triangle";
+    carrier.frequency.setValueAtTime(baseFrequency, start);
+    carrier.frequency.linearRampToValueAtTime(baseFrequency + 115, start + duration * 0.18);
+    carrier.frequency.linearRampToValueAtTime(baseFrequency - 45, end);
+    harmonic.frequency.setValueAtTime(baseFrequency * 1.48, start);
+    harmonic.frequency.linearRampToValueAtTime(baseFrequency * 1.52, start + duration * 0.22);
+    harmonic.frequency.linearRampToValueAtTime(baseFrequency * 1.45, end);
+
+    lfo.type = "sine";
+    lfo.frequency.setValueAtTime(21, start);
+    lfoGain.gain.setValueAtTime(62, start);
+    lfo.connect(lfoGain);
+    lfoGain.connect(carrier.frequency);
+    lfoGain.connect(harmonic.frequency);
+
+    mix.gain.setValueAtTime(0.9, start);
+    harmonicGain.gain.setValueAtTime(0.18, start);
+    envelope.gain.setValueAtTime(0.001, start);
+    envelope.gain.exponentialRampToValueAtTime(gain, start + 0.018);
+    envelope.gain.setValueAtTime(gain * 0.92, Math.max(start + 0.02, end - 0.08));
+    envelope.gain.exponentialRampToValueAtTime(0.001, end);
+
+    carrier.connect(mix);
+    harmonic.connect(harmonicGain);
+    harmonicGain.connect(mix);
+    mix.connect(envelope);
+    envelope.connect(this.master);
+
+    this.whistleAir({ start, duration, gain: gain * 0.22, centerFrequency: baseFrequency + 560 });
+    carrier.start(start);
+    harmonic.start(start);
+    lfo.start(start);
+    carrier.stop(end + 0.02);
+    harmonic.stop(end + 0.02);
+    lfo.stop(end + 0.02);
+  }
+
+  whistleAir({ start, duration, gain, centerFrequency }) {
+    if (!this.context || !this.master) return;
+    const length = Math.max(1, Math.floor(this.context.sampleRate * (duration + 0.04)));
+    const buffer = this.context.createBuffer(1, length, this.context.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let index = 0; index < length; index += 1) {
+      data[index] = Math.random() * 2 - 1;
+    }
+    const source = this.context.createBufferSource();
+    const highpass = this.context.createBiquadFilter();
+    const bandpass = this.context.createBiquadFilter();
+    const envelope = this.context.createGain();
+    source.buffer = buffer;
+    highpass.type = "highpass";
+    highpass.frequency.setValueAtTime(1800, start);
+    bandpass.type = "bandpass";
+    bandpass.frequency.setValueAtTime(centerFrequency, start);
+    bandpass.Q.setValueAtTime(8.5, start);
+    envelope.gain.setValueAtTime(0.001, start);
+    envelope.gain.exponentialRampToValueAtTime(gain, start + 0.012);
+    envelope.gain.exponentialRampToValueAtTime(0.001, start + duration);
+    source.connect(highpass);
+    highpass.connect(bandpass);
+    bandpass.connect(envelope);
+    envelope.connect(this.master);
+    source.start(start);
+    source.stop(start + duration + 0.04);
   }
 
   tone({ frequency, type, attack, decay, gain, delay = 0 }) {

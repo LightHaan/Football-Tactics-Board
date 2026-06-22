@@ -49,18 +49,19 @@ body {
   position: absolute;
   z-index: 4;
   left: 50%;
-  top: 48%;
-  width: min(380px, calc(100vw - 32px));
-  min-height: 92px;
-  transform: translate(-50%, -50%);
+  top: clamp(122px, 16vh, 148px);
+  width: min(540px, calc(100vw - 32px));
+  min-height: 54px;
+  transform: translateX(-50%);
   display: grid;
-  place-items: center;
-  gap: 6px;
-  padding: 16px 22px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
   border: 2px solid rgba(255, 255, 255, 0.68);
   border-radius: 8px;
   background: rgba(13, 18, 16, 0.88);
-  box-shadow: 0 20px 54px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.36);
   backdrop-filter: blur(8px);
   pointer-events: none;
 }
@@ -93,10 +94,14 @@ body {
   border-color: #7dd3fc;
 }
 
+.match-notice.is-goal {
+  border-color: #8ef0a3;
+}
+
 .notice-title {
   color: #fff;
-  font-size: clamp(36px, 7vw, 62px);
-  line-height: 0.95;
+  font-size: clamp(20px, 3vw, 32px);
+  line-height: 1;
   font-weight: 950;
 }
 
@@ -116,13 +121,17 @@ body {
   color: #7dd3fc;
 }
 
+.match-notice.is-goal .notice-title {
+  color: #8ef0a3;
+}
+
 .notice-message {
   max-width: 100%;
   overflow: hidden;
   color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: clamp(13px, 2vw, 17px);
+  font-size: clamp(12px, 1.7vw, 16px);
   font-weight: 850;
 }
 
@@ -593,6 +602,22 @@ body {
 }
 
 @media (max-width: 680px) {
+  .match-notice {
+    top: 236px;
+    width: min(370px, calc(100vw - 20px));
+    min-height: 48px;
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 8px 12px;
+  }
+
+  .notice-title {
+    font-size: 20px;
+  }
+
+  .notice-message {
+    font-size: 12px;
+  }
+
   .score-strip {
     grid-template-columns: 1fr;
     gap: 6px;
